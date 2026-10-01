@@ -1,0 +1,87 @@
+import type { StoryWriteInput } from "./stories.ts";
+
+export const initialStories: StoryWriteInput[] = [
+  {
+    slug: "story-1",
+    locale: "en-CA",
+    author: "Amaka Nwegbu",
+    role: "Founder",
+    title: "How I got my first $10,000 in funding!",
+    excerpt: "It all started back at Humber, after one email...",
+    tags: ["Mississauga, ON"],
+    imagePath: "/10k.jpg",
+    coverImagePath: "/10k.jpg",
+    bylineDate: "Monday May 20",
+    status: "PUBLISHED",
+    contentBlocks: [
+      {
+        id: "story-1-paragraph-1",
+        type: "paragraph",
+        text: "Getting my first $10,000 in grant funding came from finding the right opportunity, applying, going through training, building a strong business plan, asking for help, practicing my pitch, and showing up prepared. The opportunity started while I was attending Humber College in Ontario. I received an email from our Project Coordinator Josh Clavir studying UX/UI design Post grad about a student entrepreneurship program that supports students, both domestic and international, who are interested in starting a business. Since I already had an idea I wanted to pursue, I applied.",
+      },
+      {
+        id: "story-1-paragraph-2",
+        type: "paragraph",
+        text: "After getting into the program, I went through about six weeks of business training. The program helped me understand what it takes to turn an idea into a real business plan. I learned how to define the problem, understand my target audience, explain my solution, think through the market, create a revenue model, and plan how the business could grow. One of the biggest parts of the process was building a strong business plan. To move forward to the final competition, the plan had to be clear, detailed, and well thought out. It was not enough to just have a good idea. I had to show that I understood the problem, the people I was helping, how the business would work, and how the funding would be used.",
+      },
+      {
+        id: "story-1-pull-quote-1",
+        type: "pullQuote",
+        text: "I PRACTICED A LOT AND REFINED EVEN MORE. I ATTENDED A 1 MINUTE PITCH PRACTICE AS WELL, THAT REALLY HELPED",
+      },
+      {
+        id: "story-1-paragraph-3",
+        type: "paragraph",
+        text: "I also reached out for support. I spoke to teachers, advisors, and pitch mentors who helped me review my plan and improve my pitch. Their feedback helped me see what was unclear, what needed more detail, and how to communicate the business better. I kept editing, refining, and improving the plan until it felt much stronger. Once my business plan was selected, I moved on to the final pitch competition. I created a pitch deck and practiced a lot. I practiced by myself, with advisors, and with people who could give honest feedback. This helped me become more confident, improve my timing, and explain my idea more clearly.",
+      },
+      {
+        id: "story-1-paragraph-4",
+        type: "paragraph",
+        text: "On competition day, I pitched the business to the judges. I shared the problem, my solution, who the business was for, why it mattered, and how the funding would help move it forward. After the pitch, it was announced that I was one of the winners. That was how I received my first $10,000 in funding to start my business.",
+      },
+      {
+        id: "story-1-paragraph-5",
+        type: "paragraph",
+        text: "The biggest lesson I learned is that funding does not only come from having a good idea. It comes from taking the process seriously, asking for help, accepting feedback, practicing, and being willing to improve. The grant was not just a win; it was a starting point that helped me begin building the business with more confidence and direction.",
+      },
+    ],
+  },
+  {
+    slug: "story-2",
+    locale: "en-CA",
+    author: "Daniel Ike",
+    role: "Senior Product Designer",
+    title: "How I vibe-coded my first A.I powered wealth app",
+    excerpt: "From a side project to my full-time product...",
+    tags: ["Mississauga, ON"],
+    imagePath: "/vibe-code.jpg",
+    coverImagePath: "/vibe-code.jpg",
+    bylineDate: "Monday May 20",
+    status: "PUBLISHED",
+    contentBlocks: [
+      { id: "story-2-paragraph-1", type: "paragraph", text: "I started this project as an experiment after work, using nights and weekends to validate an idea that kept coming back to me. The goal was simple: make investing education easier for newcomers with clear, visual guidance." },
+      { id: "story-2-paragraph-2", type: "paragraph", text: "The first version was rough but functional. I kept shipping small updates, talking to users, and refining based on real feedback. The biggest growth came when I stopped trying to build everything and focused on one clear user journey." },
+      { id: "story-2-pull-quote-1", type: "pullQuote", text: "START SMALL, SHIP OFTEN, AND LET USER FEEDBACK GUIDE THE NEXT BUILD" },
+      { id: "story-2-paragraph-3", type: "paragraph", text: "Within months, the product had enough traction to become my full-time focus. Looking back, consistency and iteration mattered far more than trying to be perfect on day one." },
+    ],
+  },
+  {
+    slug: "story-3",
+    locale: "en-CA",
+    author: "Tobi Ojo",
+    role: "Content creator",
+    title: "How I got my first 80,000 followers on social media",
+    excerpt: "Content strategies and mindset shifts...",
+    tags: ["Mississauga, ON"],
+    imagePath: "/80k.jpg",
+    coverImagePath: "/80k.jpg",
+    bylineDate: "Monday May 20",
+    status: "PUBLISHED",
+    contentBlocks: [
+      { id: "story-3-paragraph-1", type: "paragraph", text: "My growth did not come from one viral post. It came from posting consistently, improving hooks, and learning what my audience cared about." },
+      { id: "story-3-paragraph-2", type: "paragraph", text: "I built a weekly content system, tracked performance, and doubled down on formats that performed best. Over time, trust and repetition turned into steady growth." },
+      { id: "story-3-pull-quote-1", type: "pullQuote", text: "CONSISTENCY BEATS VIRALITY WHEN YOU WANT LASTING GROWTH" },
+      { id: "story-3-paragraph-3", type: "paragraph", text: "The biggest shift was treating content like a long-term craft, not a short-term sprint." },
+    ],
+  },
+];
