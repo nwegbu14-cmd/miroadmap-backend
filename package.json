@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc --noEmit",
     "dev": "tsx watch index.ts",
-    "start": "tsx index.ts",
+    "start": "node --import tsx index.ts",
     "seed:featured-roadmaps": "tsx src/scripts/seed-featured-roadmaps.ts",
     "repair:roadmap-task-metadata": "node --import tsx src/scripts/repair-roadmap-task-metadata.ts",
     "seed:stories": "tsx src/scripts/seed-stories.ts",
@@ -28,12 +28,12 @@
     "@supabase/supabase-js": "^2.109.0",
     "dotenv": "^17.2.2",
     "express": "^5.2.1",
-    "stripe": "^22.6.2"
+    "stripe": "^22.6.2",
+    "tsx": "^4.23.13"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.2",
-    "tsx": "^4.23.13",
     "typescript": "^7.0.2"
   }
 }
