@@ -35,6 +35,8 @@ type RoadmapAiSuggestionPayload = RoadmapAiChange & {
   taskId: string | null;
 };
 
+const FREE_MONTHLY_AI_ADJUSTMENTS = 3;
+
 type BaseTaskSlot = {
   stepId: string;
   stepPosition: number;
@@ -262,21 +264,74 @@ export async function getPersonalizedRoadmapAtVersion(
   return { ...roadmap, steps };
 }
 
+async function monthlyRoadmapTailorUsage(userId: string) {
+  const month = new Date().toISOString().slice(0, 7);
+  const runs = await db.orm.public.AiRun
+    .select("status", "createdAt")
+    .where({ userId, feature: "ROADMAP_TAILOR" })
+    .all();
+
+  return runs.filter((run) => run.status === "SUCCEEDED" && String(run.createdAt).startsWith(month)).length;
+}
+
+function limitedAiAccess(plan: string, monthlyLimit: number, monthlyUsed: number, planEntitled = true) {
+  const monthlyRemaining = Math.max(0, monthlyLimit - monthlyUsed);
+  return {
+    entitled: planEntitled && monthlyRemaining > 0,
+    plan,
+    monthlyLimit,
+    monthlyUsed,
+    monthlyRemaining,
+    limitReached: monthlyRemaining === 0,
+  };
+}
+
 async function aiAccess(user: AppUser) {
   if (user.role !== "USER" || user.accountType === "INTERNAL" || user.accountType === "DEMO") {
-    return { entitled: true, plan: "Internal" };
+    return {
+      entitled: true,
+      plan: "Internal",
+      monthlyLimit: null,
+      monthlyUsed: 0,
+      monthlyRemaining: null,
+      limitReached: false,
+    };
   }
-  const subscription = await db.orm.public.Subscription
-    .select("planId", "status")
-    .first({ userId: user.id });
+  const [subscription, monthlyUsed] = await Promise.all([
+    db.orm.public.Subscription
+      .select("planId", "status")
+      .first({ userId: user.id }),
+    monthlyRoadmapTailorUsage(user.id),
+  ]);
   if (!subscription || subscription.status === "CANCELED" || subscription.status === "PAST_DUE") {
-    return { entitled: false, plan: null };
+    return limitedAiAccess("Free", FREE_MONTHLY_AI_ADJUSTMENTS, monthlyUsed);
   }
   const plan = await db.orm.public.Plan.select("name").first({ id: subscription.planId });
-  const entitlement = await db.orm.public.PlanEntitlement
-    .select("limitBool")
-    .first({ planId: subscription.planId, key: "CAN_USE_AI" });
-  return { entitled: entitlement?.limitBool === true, plan: plan?.name ?? null };
+  const [accessEntitlement, creditEntitlement] = await Promise.all([
+    db.orm.public.PlanEntitlement
+      .select("limitBool")
+      .first({ planId: subscription.planId, key: "CAN_USE_AI" }),
+    db.orm.public.PlanEntitlement
+      .select("limitInt")
+      .first({ planId: subscription.planId, key: "MONTHLY_AI_CREDITS" }),
+  ]);
+  const monthlyLimit = creditEntitlement?.limitInt;
+  if (typeof monthlyLimit !== "number") {
+    return {
+      entitled: accessEntitlement?.limitBool === true,
+      plan: plan?.name ?? "Paid",
+      monthlyLimit: null,
+      monthlyUsed,
+      monthlyRemaining: null,
+      limitReached: false,
+    };
+  }
+  return limitedAiAccess(
+    plan?.name ?? "Paid",
+    monthlyLimit,
+    monthlyUsed,
+    accessEntitlement?.limitBool === true,
+  );
 }
 
 async function recalculatePersonalizedProgress(userId: string, roadmapId: string, versionId: string) {
@@ -423,6 +478,10 @@ export async function getRoadmapAiSession(user: AppUser, identifier: string) {
       plan: access.plan,
       providerConfigured: provider.configured,
       model: provider.model,
+      monthlyLimit: access.monthlyLimit,
+      monthlyUsed: access.monthlyUsed,
+      monthlyRemaining: access.monthlyRemaining,
+      limitReached: access.limitReached,
     },
     conversation: conversation ? {
       id: conversation.id,
@@ -464,7 +523,15 @@ export async function sendRoadmapAiMessage(input: {
   await connectDatabase();
   const resolved = await resolveFollowedRoadmap(input.user.id, input.identifier);
   const access = await aiAccess(input.user);
-  if (!access.entitled) throw new RoadmapAiError("Upgrade to Premium or Ultimate to use Roadmap Copilot", 402);
+  if (!access.entitled) {
+    if (access.limitReached && access.monthlyLimit !== null) {
+      throw new RoadmapAiError(
+        `You have used all ${access.monthlyLimit} AI roadmap adjustments available this month`,
+        429,
+      );
+    }
+    throw new RoadmapAiError("Upgrade to Premium or Ultimate to use Roadmap Copilot", 402);
+  }
   const provider = getRoadmapAiProviderConfig();
   if (!provider.configured) throw new RoadmapAiError("Roadmap AI is ready but needs ANTHROPIC_API_KEY on the backend", 503);
   if (input.idempotencyKey) {

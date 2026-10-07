@@ -29,7 +29,7 @@ function isPrivateDevOrigin(origin: string): boolean {
 
   try {
     const url = new URL(origin);
-    if (url.protocol !== "http:" || url.port !== "3000") return false;
+    if (url.protocol !== "http:" || url.port !== "5001") return false;
     if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return true;
 
     const octets = url.hostname.split(".").map(Number);

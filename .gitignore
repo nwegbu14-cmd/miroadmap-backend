@@ -5,3 +5,4 @@ node_modules/
 dist/
 coverage/
 *.log
+LOCAL_DB_STARTUP.md
