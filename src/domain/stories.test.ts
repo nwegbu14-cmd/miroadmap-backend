@@ -22,6 +22,7 @@ const validStory = {
   imagePath: "/story.jpg",
   coverImagePath: "/story.jpg",
   bylineDate: "September 28, 2026",
+  roadmapId: "featured-1",
   status: "draft",
 };
 
@@ -31,6 +32,14 @@ test("story input normalizes status and preserves ordered blocks", () => {
   if (!parsed.ok) return;
   assert.equal(parsed.value.status, "DRAFT");
   assert.deepEqual(parsed.value.contentBlocks.map((block) => block.type), ["paragraph", "pullQuote"]);
+  assert.equal(parsed.value.roadmapId, "featured-1");
+});
+
+test("story input allows an admin to leave the roadmap unlinked", () => {
+  const parsed = parseStoryWriteInput({ ...validStory, roadmapId: "" });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) return;
+  assert.equal(parsed.value.roadmapId, null);
 });
 
 test("story input rejects duplicate block ids and invalid slugs", () => {

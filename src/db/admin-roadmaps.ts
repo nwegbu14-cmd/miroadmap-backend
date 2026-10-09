@@ -36,6 +36,7 @@ export async function getAdminRoadmapOverview() {
         "id",
         "title",
         "status",
+        "moderationStatus",
         "origin",
         "visibility",
         "authorId",
@@ -86,6 +87,7 @@ export async function getAdminRoadmapOverview() {
       title: roadmap.title,
       category: snapshot?.category?.trim() || "Uncategorized",
       status: roadmap.status as RoadmapStatus,
+      moderationStatus: roadmap.moderationStatus as "PENDING" | "APPROVED" | "FLAGGED" | "REJECTED" | "ERROR",
       origin: roadmap.origin as "OFFICIAL" | "COMMUNITY",
       visibility: roadmap.visibility as "PUBLIC" | "UNLISTED" | "PRIVATE",
       author: author ? {

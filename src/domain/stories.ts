@@ -22,6 +22,7 @@ export type StoryWriteInput = {
   imagePath?: string;
   coverImagePath?: string;
   bylineDate?: string;
+  roadmapId: string | null;
   status: StoryStatus;
 };
 
@@ -84,6 +85,7 @@ export function parseStoryWriteInput(value: unknown): StoryValidationResult {
   const imagePath = optionalText(source.imagePath, 2_048);
   const coverImagePath = optionalText(source.coverImagePath, 2_048);
   const bylineDate = optionalText(source.bylineDate, 120);
+  const roadmapId = optionalText(source.roadmapId, 120);
   const status = normalizedText(source.status).toUpperCase();
   const contentBlocks = parseContentBlocks(source.contentBlocks);
   const tags = Array.isArray(source.tags)
@@ -99,7 +101,7 @@ export function parseStoryWriteInput(value: unknown): StoryValidationResult {
   if (author.length < 2 || author.length > 120) {
     return { ok: false, error: "Author must be between 2 and 120 characters" };
   }
-  if (role === null || imagePath === null || coverImagePath === null || bylineDate === null) {
+  if (role === null || imagePath === null || coverImagePath === null || bylineDate === null || roadmapId === null) {
     return { ok: false, error: "A story field is longer than allowed" };
   }
   if (title.length < 5 || title.length > 200) {
@@ -132,6 +134,7 @@ export function parseStoryWriteInput(value: unknown): StoryValidationResult {
       imagePath,
       coverImagePath,
       bylineDate,
+      roadmapId: roadmapId ?? null,
       status: status as StoryStatus,
     },
   };

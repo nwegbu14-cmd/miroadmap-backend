@@ -29,6 +29,7 @@ const storySelection = [
   "shareCount",
   "viewCount",
   "readMinutes",
+  "roadmapId",
   "status",
   "publishedAt",
   "createdAt",
@@ -53,6 +54,7 @@ type StoryRow = {
   shareCount: number;
   viewCount: number;
   readMinutes: number | null;
+  roadmapId: string | null;
   status: "DRAFT" | "PUBLISHED";
   publishedAt: unknown;
   createdAt: unknown;
@@ -96,6 +98,7 @@ function serializeStory(story: StoryRow) {
     shareCount: story.shareCount,
     viewCount: story.viewCount,
     readMinutes: story.readMinutes ?? storyReadMinutes(contentBlocks),
+    roadmapId: story.roadmapId,
     status: story.status,
     publishedAt: story.publishedAt ? String(story.publishedAt) : null,
     createdAt: String(story.createdAt),
@@ -122,6 +125,7 @@ function persistenceFields(input: StoryWriteInput) {
     imagePath: input.imagePath,
     coverImagePath: input.coverImagePath,
     bylineDate: input.bylineDate,
+    roadmapId: input.roadmapId,
     readMinutes: storyReadMinutes(input.contentBlocks),
     status: input.status,
   };
@@ -203,6 +207,19 @@ export async function isStorySlugAvailable(slug: string, excludeId?: string): Pr
   await connectDatabase();
   const existing = await db.orm.public.Story.select("id").first({ slug });
   return !existing || String(existing.id) === excludeId;
+}
+
+export async function isStoryRoadmapAvailable(roadmapId: string): Promise<boolean> {
+  await connectDatabase();
+  const roadmap = await db.orm.public.Roadmap
+    .select("id", "publishedVersionId")
+    .first({
+      id: roadmapId,
+      status: "PUBLISHED",
+      visibility: "PUBLIC",
+      moderationStatus: "APPROVED",
+    });
+  return Boolean(roadmap?.publishedVersionId);
 }
 
 async function applyPublishedAt(id: string, shouldPublish: boolean) {

@@ -660,7 +660,31 @@ export async function publishRoadmap(
         .select("id")
         .first({ roadmapId, requesterId: userId });
       if (!existingRequest) {
-        await tx.orm.public.VerificationRequest.create({ roadmapId, requesterId: userId });
+        const verificationRequest = await tx.orm.public.VerificationRequest
+          .select("id")
+          .create({ roadmapId, requesterId: userId });
+        const [admins, superAdmins] = await Promise.all([
+          tx.orm.public.User.select("id").where({ role: "ADMIN", status: "ACTIVE" }).all(),
+          tx.orm.public.User.select("id").where({ role: "SUPER_ADMIN", status: "ACTIVE" }).all(),
+        ]);
+
+        for (const admin of [...admins, ...superAdmins]) {
+          await tx.orm.public.Notification.create({
+            userId: admin.id,
+            actorId: userId,
+            type: "VERIFICATION_REQUEST_SUBMITTED",
+            category: "VERIFICATION",
+            priority: "NORMAL",
+            title: "New verification request",
+            body: `“${snapshot.title}” was submitted for verification.`,
+            href: `/admin/verification/${verificationRequest.id}`,
+            entityType: "VERIFICATION_REQUEST",
+            entityId: verificationRequest.id,
+            metadata: { roadmapId },
+            dedupeKey: `verification-request:${verificationRequest.id}:admin:${admin.id}`,
+            groupKey: "admin-verification-requests",
+          });
+        }
       }
     }
 

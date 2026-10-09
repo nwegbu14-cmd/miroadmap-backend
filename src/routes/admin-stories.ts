@@ -4,6 +4,7 @@ import {
   createStory,
   deleteStory,
   isStorySlugAvailable,
+  isStoryRoadmapAvailable,
   listAdminStories,
   updateStory,
 } from "../db/stories.ts";
@@ -39,6 +40,10 @@ adminStoriesRouter.post("/", async (request, response) => {
     response.status(409).json({ error: "A story already uses that slug" });
     return;
   }
+  if (parsed.value.roadmapId && !(await isStoryRoadmapAvailable(parsed.value.roadmapId))) {
+    response.status(400).json({ error: "Select a published public roadmap" });
+    return;
+  }
   const story = await createStory(parsed.value);
   response.status(201).json({ story });
 });
@@ -54,6 +59,10 @@ adminStoriesRouter.put("/:storyId", async (request, response) => {
   }
   if (!(await isStorySlugAvailable(parsed.value.slug, storyId))) {
     response.status(409).json({ error: "A story already uses that slug" });
+    return;
+  }
+  if (parsed.value.roadmapId && !(await isStoryRoadmapAvailable(parsed.value.roadmapId))) {
+    response.status(400).json({ error: "Select a published public roadmap" });
     return;
   }
   const story = await updateStory(storyId, parsed.value);

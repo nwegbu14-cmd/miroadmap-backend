@@ -12,6 +12,7 @@ export const initialStories: StoryWriteInput[] = [
     imagePath: "/10k.jpg",
     coverImagePath: "/10k.jpg",
     bylineDate: "Monday May 20",
+    roadmapId: "featured-1",
     status: "PUBLISHED",
     contentBlocks: [
       {
@@ -57,6 +58,7 @@ export const initialStories: StoryWriteInput[] = [
     imagePath: "/vibe-code.jpg",
     coverImagePath: "/vibe-code.jpg",
     bylineDate: "Monday May 20",
+    roadmapId: null,
     status: "PUBLISHED",
     contentBlocks: [
       { id: "story-2-paragraph-1", type: "paragraph", text: "I started this project as an experiment after work, using nights and weekends to validate an idea that kept coming back to me. The goal was simple: make investing education easier for newcomers with clear, visual guidance." },
@@ -76,6 +78,7 @@ export const initialStories: StoryWriteInput[] = [
     imagePath: "/80k.jpg",
     coverImagePath: "/80k.jpg",
     bylineDate: "Monday May 20",
+    roadmapId: null,
     status: "PUBLISHED",
     contentBlocks: [
       { id: "story-3-paragraph-1", type: "paragraph", text: "My growth did not come from one viral post. It came from posting consistently, improving hooks, and learning what my audience cared about." },
