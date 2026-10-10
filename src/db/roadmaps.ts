@@ -614,6 +614,10 @@ export async function publishRoadmap(
   };
   const now = instantFactory.from(new Date().toISOString());
   await db.transaction(async (tx) => {
+    const followers = await tx.orm.public.RoadmapFollow
+      .select("userId", "versionId")
+      .where({ roadmapId })
+      .all();
     const categorySlug = slugify(snapshot.category);
     let category = await tx.orm.public.Category.select("id").first({ slug: categorySlug });
     category ??= await tx.orm.public.Category.select("id").create({
@@ -693,6 +697,29 @@ export async function publishRoadmap(
       action: "ROADMAP_PUBLISHED",
       metadata: { roadmapId, versionId: version.id },
     });
+
+    for (const follower of followers) {
+      if (!follower.versionId || follower.versionId === version.id) continue;
+      await tx.orm.public.Notification.create({
+        userId: follower.userId,
+        actorId: userId,
+        type: "ROADMAP_UPDATE_AVAILABLE",
+        category: "ROADMAP",
+        priority: "NORMAL",
+        title: "Roadmap update available",
+        body: `“${snapshot.title}” has a new version. Review it and choose when to update.`,
+        href: `/user-dashboard/roadmaps/${roadmapId}?update=1`,
+        entityType: "ROADMAP",
+        entityId: roadmapId,
+        metadata: {
+          roadmapId,
+          fromVersionId: follower.versionId,
+          toVersionId: version.id,
+        },
+        dedupeKey: `roadmap-update:${roadmapId}:${version.id}:user:${follower.userId}`,
+        groupKey: `roadmap-updates:${roadmapId}`,
+      });
+    }
   });
 
   const published = await db.orm.public.Roadmap

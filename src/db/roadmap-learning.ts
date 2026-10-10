@@ -78,17 +78,22 @@ async function resolvePublishedRoadmap(identifier: string) {
 
 async function taskIndexForVersion(versionId: string) {
   const steps = await db.orm.public.RoadmapStep
-    .select("id", "position")
+    .select("id", "position", "title")
     .where({ versionId })
     .orderBy((step) => step.position.asc())
     .all();
   const tasks = (await Promise.all(steps.map(async (step) => {
     const rows = await db.orm.public.RoadmapTask
-      .select("id", "position", "required", "xp")
+      .select("id", "position", "title", "required", "xp")
       .where({ stepId: step.id })
       .orderBy((task) => task.position.asc())
       .all();
-    return rows.map((task) => ({ ...task, stepId: step.id, stepPosition: step.position }));
+    return rows.map((task) => ({
+      ...task,
+      stepId: step.id,
+      stepPosition: step.position,
+      stepTitle: step.title,
+    }));
   }))).flat();
   return { steps, tasks };
 }
@@ -253,6 +258,109 @@ export async function unfollowRoadmap(userId: string, identifier: string) {
       });
     });
   }
+  return getRoadmapLearningState(userId, roadmap.id);
+}
+
+function contentKey(stepTitle: string, taskTitle: string) {
+  const normalize = (value: string) => value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
+  return `${normalize(stepTitle)}\u0000${normalize(taskTitle)}`;
+}
+
+export async function acceptRoadmapUpdate(userId: string, identifier: string) {
+  await connectDatabase();
+  const roadmap = await resolvePublishedRoadmap(identifier);
+  const follow = await db.orm.public.RoadmapFollow
+    .select("versionId")
+    .first({ userId, roadmapId: roadmap.id });
+  if (!follow?.versionId) {
+    throw new RoadmapLearningError("Follow this roadmap before accepting an update", 409);
+  }
+  if (follow.versionId === roadmap.publishedVersionId) {
+    return getRoadmapLearningState(userId, roadmap.id);
+  }
+
+  const progress = await db.orm.public.RoadmapProgress
+    .select("id", "startedAt")
+    .first({ userId, roadmapId: roadmap.id });
+  if (!progress) {
+    throw new RoadmapLearningError("Roadmap progress could not be found", 409);
+  }
+  const progressRecord = progress;
+
+  const [previousTree, nextTree, completions, personalization] = await Promise.all([
+    taskIndexForVersion(follow.versionId),
+    taskIndexForVersion(roadmap.publishedVersionId),
+    db.orm.public.TaskCompletion
+      .select("taskId", "completedAt")
+      .where({ progressId: progressRecord.id })
+      .all(),
+    db.orm.public.RoadmapPersonalization
+      .select("id")
+      .first({ userId, roadmapId: roadmap.id }),
+  ]);
+  const previousTaskById = new Map(previousTree.tasks.map((task) => [task.id, task]));
+  const nextTaskByKey = new Map(
+    nextTree.tasks.map((task) => [contentKey(task.stepTitle, task.title), task] as const),
+  );
+  const preservedCompletionByTaskId = new Map<string, (typeof completions)[number]["completedAt"]>();
+  for (const completion of completions) {
+    if (!completion.taskId) continue;
+    const previousTask = previousTaskById.get(completion.taskId);
+    if (!previousTask) continue;
+    const nextTask = nextTaskByKey.get(contentKey(previousTask.stepTitle, previousTask.title));
+    if (nextTask) preservedCompletionByTaskId.set(nextTask.id, completion.completedAt);
+  }
+  const preservedCompletions = [...preservedCompletionByTaskId].map(([taskId, completedAt]) => ({
+    taskId,
+    completedAt,
+  }));
+  const firstStep = nextTree.steps[0];
+  const instantFactory = progressRecord.startedAt.constructor as {
+    from(value: string): typeof progressRecord.startedAt;
+  };
+  const now = instantFactory.from(new Date().toISOString());
+
+  await db.transaction(async (tx) => {
+    await tx.orm.public.TaskCompletion.where({ progressId: progressRecord.id }).deleteAndCount();
+    await tx.orm.public.RoadmapFollow
+      .where({ userId, roadmapId: roadmap.id })
+      .update({ versionId: roadmap.publishedVersionId });
+    await tx.orm.public.RoadmapProgress.where({ id: progressRecord.id }).update({
+      versionId: roadmap.publishedVersionId,
+      currentStepId: firstStep?.id ?? null,
+      percentComplete: 0,
+      xpEarned: 0,
+      lastActivityAt: now,
+      completedAt: null,
+    });
+    for (const completion of preservedCompletions) {
+      await tx.orm.public.TaskCompletion.create({
+        progressId: progressRecord.id,
+        taskId: completion.taskId,
+        completedAt: completion.completedAt,
+      });
+    }
+    if (personalization) {
+      await tx.orm.public.RoadmapDelta
+        .where({ personalizationId: personalization.id, status: "ACTIVE" })
+        .update({ status: "ORPHANED" });
+      await tx.orm.public.RoadmapPersonalization.where({ id: personalization.id }).update({
+        baseVersionId: roadmap.publishedVersionId,
+        rebasedAt: now,
+      });
+    }
+    await tx.orm.public.UserActivity.create({
+      userId,
+      action: "ROADMAP_UPDATE_ACCEPTED",
+      metadata: {
+        roadmapId: roadmap.id,
+        fromVersionId: follow.versionId,
+        toVersionId: roadmap.publishedVersionId,
+        preservedTaskCount: preservedCompletions.length,
+      },
+    });
+  });
+
   return getRoadmapLearningState(userId, roadmap.id);
 }
 

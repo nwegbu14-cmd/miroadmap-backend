@@ -17,6 +17,7 @@ import {
 } from "../db/roadmaps.ts";
 import {
   followRoadmap,
+  acceptRoadmapUpdate,
   getFollowedRoadmap,
   getRoadmapLearningState,
   listFollowedRoadmaps,
@@ -256,6 +257,22 @@ roadmapsRouter.post("/:roadmapId/follow", authenticate, activeRoles, async (requ
 roadmapsRouter.delete("/:roadmapId/follow", authenticate, activeRoles, async (request, response) => {
   try {
     const learning = await unfollowRoadmap(
+      request.appUser!.id,
+      String(request.params.roadmapId ?? ""),
+    );
+    response.json({ learning });
+  } catch (error) {
+    if (error instanceof RoadmapLearningError) {
+      response.status(error.status).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+});
+
+roadmapsRouter.post("/:roadmapId/accept-update", authenticate, activeRoles, async (request, response) => {
+  try {
+    const learning = await acceptRoadmapUpdate(
       request.appUser!.id,
       String(request.params.roadmapId ?? ""),
     );
