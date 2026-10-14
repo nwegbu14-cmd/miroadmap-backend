@@ -4,6 +4,7 @@ import {
   createRoadmapDraft,
   getOwnedRoadmap,
   getPublishedRoadmap,
+  incrementPublishedRoadmapViewCount,
   listOwnedRoadmaps,
   listPublishedRoadmaps,
   listRoadmapVersions,
@@ -19,6 +20,7 @@ import {
   followRoadmap,
   acceptRoadmapUpdate,
   getFollowedRoadmap,
+  getRoadmapFollowerSummary,
   getRoadmapLearningState,
   listFollowedRoadmaps,
   RoadmapLearningError,
@@ -26,11 +28,22 @@ import {
   unfollowRoadmap,
 } from "../db/roadmap-learning.ts";
 import { authenticate, requireRoles } from "../middleware/auth.ts";
+import { createRateLimit } from "../middleware/rate-limit.ts";
+import {
+  decodeRoadmapImage,
+  getRoadmapImagePublicUrl,
+  uploadRoadmapImage,
+} from "../lib/roadmap-storage.ts";
 import { roadmapAiRouter } from "./roadmap-ai.ts";
 
 export const roadmapsRouter = Router();
 
 const activeRoles = requireRoles("USER", "MODERATOR", "ADMIN", "SUPER_ADMIN");
+const viewRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1_000,
+  max: 120,
+  message: "Too many roadmap view requests. Please try again later.",
+});
 
 roadmapsRouter.use("/:roadmapId/ai", roadmapAiRouter);
 
@@ -186,6 +199,33 @@ roadmapsRouter.get("/published/:roadmapId", async (request, response) => {
   response.json({ roadmap });
 });
 
+roadmapsRouter.get("/published/:roadmapId/followers", async (request, response) => {
+  try {
+    const roadmapId = String(request.params.roadmapId ?? "");
+    response.json({ summary: await getRoadmapFollowerSummary(roadmapId) });
+  } catch (error) {
+    if (error instanceof RoadmapLearningError) {
+      response.status(error.status).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+});
+
+roadmapsRouter.post("/published/:roadmapId/view", viewRateLimit, async (request, response) => {
+  const roadmapId = String(request.params.roadmapId ?? "");
+  if (!roadmapId) {
+    response.status(400).json({ error: "A roadmap identifier is required" });
+    return;
+  }
+  const viewCount = await incrementPublishedRoadmapViewCount(roadmapId);
+  if (viewCount === null) {
+    response.status(404).json({ error: "Published roadmap not found" });
+    return;
+  }
+  response.json({ viewCount });
+});
+
 roadmapsRouter.get("/published", async (request, response) => {
   const requestedOrigin = String(request.query.origin ?? "").toUpperCase();
   const origin = requestedOrigin === "OFFICIAL" || requestedOrigin === "COMMUNITY"
@@ -200,6 +240,21 @@ roadmapsRouter.get("/mine", authenticate, activeRoles, async (request, response)
 
 roadmapsRouter.get("/following", authenticate, activeRoles, async (request, response) => {
   response.json({ follows: await listFollowedRoadmaps(request.appUser!.id) });
+});
+
+roadmapsRouter.post("/images", authenticate, activeRoles, async (request, response) => {
+  try {
+    const { bytes, mimeType } = decodeRoadmapImage(
+      request.body?.contentBase64,
+      request.body?.mimeType,
+    );
+    const path = await uploadRoadmapImage(request.appUser!.id, bytes, mimeType);
+    response.status(201).json({ path, url: getRoadmapImagePublicUrl(path) });
+  } catch (error) {
+    response.status(400).json({
+      error: error instanceof Error ? error.message : "Invalid roadmap image",
+    });
+  }
 });
 
 roadmapsRouter.get("/following/:roadmapId", authenticate, activeRoles, async (request, response) => {

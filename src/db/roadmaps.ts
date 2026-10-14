@@ -76,6 +76,8 @@ export type RoadmapRecord = {
   audience: string;
   requestVerification: boolean;
   origin: "official" | "community";
+  isVerified: boolean;
+  viewCount: number;
   stepCount: number;
   publishedAt: string | null;
   versionId: string;
@@ -116,6 +118,8 @@ type RoadmapRow = {
   status: string;
   authorId: unknown | null;
   origin?: "OFFICIAL" | "COMMUNITY";
+  isVerified?: boolean;
+  viewCount?: number;
   currentVersionId: string | null;
   publishedVersionId?: string | null;
   draftVersionId?: string | null;
@@ -200,8 +204,10 @@ function toRoadmapRecord(
     attribution: snapshot.attribution,
     aiAssistance: snapshot.aiAssistance,
     audience: snapshot.audience,
-    requestVerification: snapshot.requestVerification,
+    requestVerification: snapshot.requestVerification === true,
     origin: row.origin === "OFFICIAL" ? "official" : "community",
+    isVerified: row.isVerified === true,
+    viewCount: row.viewCount ?? 0,
     stepCount: snapshot.displayStepCount ?? snapshot.steps.length,
     publishedAt: row.publishedAt ? toIso(row.publishedAt) : null,
     versionId: activeVersion.id,
@@ -278,6 +284,9 @@ export async function createRoadmapDraft(
         "attribution",
         "status",
         "authorId",
+        "origin",
+        "isVerified",
+        "viewCount",
         "currentVersionId",
         "publishedVersionId",
         "draftVersionId",
@@ -540,6 +549,9 @@ export async function updateRoadmapDraft(
       "attribution",
       "status",
       "authorId",
+      "origin",
+      "isVerified",
+      "viewCount",
       "currentVersionId",
       "publishedVersionId",
       "draftVersionId",
@@ -582,6 +594,9 @@ export async function publishRoadmap(
       "attribution",
       "status",
       "authorId",
+      "origin",
+      "isVerified",
+      "viewCount",
       "currentVersionId",
       "publishedVersionId",
       "draftVersionId",
@@ -733,6 +748,9 @@ export async function publishRoadmap(
       "attribution",
       "status",
       "authorId",
+      "origin",
+      "isVerified",
+      "viewCount",
       "currentVersionId",
       "publishedVersionId",
       "draftVersionId",
@@ -770,6 +788,8 @@ export async function getPublishedRoadmap(identifier: string): Promise<RoadmapRe
     "attribution",
     "status",
     "origin",
+    "isVerified",
+    "viewCount",
     "authorId",
     "currentVersionId",
     "publishedVersionId",
@@ -833,6 +853,8 @@ export async function getRoadmapAtVersion(
       "attribution",
       "status",
       "origin",
+      "isVerified",
+      "viewCount",
       "authorId",
       "currentVersionId",
       "publishedVersionId",
@@ -880,6 +902,9 @@ export async function getOwnedRoadmap(
       "attribution",
       "status",
       "authorId",
+      "origin",
+      "isVerified",
+      "viewCount",
       "currentVersionId",
       "publishedVersionId",
       "draftVersionId",
@@ -916,6 +941,8 @@ export async function getAdminRoadmap(roadmapId: string): Promise<RoadmapRecord 
       "attribution",
       "status",
       "origin",
+      "isVerified",
+      "viewCount",
       "authorId",
       "currentVersionId",
       "publishedVersionId",
@@ -963,6 +990,8 @@ export async function listPublishedRoadmaps(
       "attribution",
       "status",
       "origin",
+      "isVerified",
+      "viewCount",
       "authorId",
       "currentVersionId",
       "publishedVersionId",
@@ -1008,6 +1037,29 @@ export async function listPublishedRoadmaps(
   return records.filter((record): record is RoadmapRecord => record !== null);
 }
 
+export async function incrementPublishedRoadmapViewCount(
+  identifier: string,
+): Promise<number | null> {
+  await connectDatabase();
+  const published = await db.orm.public.Roadmap
+    .select("id")
+    .first({ slug: identifier, status: "PUBLISHED" })
+    ?? await db.orm.public.Roadmap
+      .select("id")
+      .first({ id: identifier, status: "PUBLISHED" });
+  if (!published) return null;
+
+  const plan = db.sql.public.roadmap
+    .update((fields, functions) => ({
+      viewCount: functions.raw`${fields.viewCount} + ${1}`.returns("pg/int4@1"),
+    }))
+    .where((fields, functions) => functions.eq(fields.id, String(published.id)))
+    .returning("viewCount")
+    .build();
+  const [roadmap] = await db.runtime().query(plan);
+  return roadmap?.viewCount ?? null;
+}
+
 export async function listOwnedRoadmaps(userId: string): Promise<RoadmapRecord[]> {
   await connectDatabase();
   const roadmaps = await db.orm.public.Roadmap
@@ -1021,6 +1073,9 @@ export async function listOwnedRoadmaps(userId: string): Promise<RoadmapRecord[]
       "attribution",
       "status",
       "authorId",
+      "origin",
+      "isVerified",
+      "viewCount",
       "currentVersionId",
       "publishedVersionId",
       "draftVersionId",
@@ -1246,6 +1301,8 @@ export async function upsertFeaturedRoadmap(seed: FeaturedRoadmapSeed): Promise<
         attribution: seed.attribution === "anonymous" ? "ANONYMOUS" : "NAME",
         status: "PUBLISHED",
         origin: "OFFICIAL",
+        isVerified: true,
+        viewCount: 0,
         authorId: null,
         currentVersionId: version.id,
         publishedVersionId: version.id,

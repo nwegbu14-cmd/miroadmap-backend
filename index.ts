@@ -20,6 +20,8 @@ import {
   apiSecurityHeaders,
   rejectUnsafePayloadShape,
 } from "./src/middleware/request-security.ts";
+import { logRequests } from "./src/middleware/request-logging.ts";
+import { errorLogFields, runtimeLog } from "./src/lib/runtime-log.ts";
 
 const config = getConfig();
 const app = express();
@@ -66,6 +68,7 @@ const cors: RequestHandler = (request, response, next) => {
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
+app.use(logRequests);
 app.use(apiSecurityHeaders);
 app.use(cors);
 // Stripe signature verification requires the exact raw request bytes. This
@@ -95,12 +98,33 @@ app.use((_request, response) => {
   response.status(404).json({ error: "Route not found" });
 });
 
-const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
-  console.error(error);
+const errorHandler: ErrorRequestHandler = (error, request, response, next) => {
+  runtimeLog("error", "request_error", {
+    requestId: response.locals.requestId,
+    method: request.method,
+    path: request.path,
+    ...errorLogFields(error),
+  });
+  if (response.headersSent) {
+    next(error);
+    return;
+  }
   response.status(500).json({ error: "Internal server error" });
 };
 app.use(errorHandler);
 
 app.listen(config.port, () => {
-  console.log(`miRoadmap API listening on http://localhost:${config.port}`);
+  runtimeLog("info", "server_started", {
+    port: config.port,
+    environment: process.env.NODE_ENV ?? "development",
+  });
+});
+
+process.on("unhandledRejection", (reason) => {
+  runtimeLog("error", "unhandled_rejection", errorLogFields(reason));
+});
+
+process.on("uncaughtException", (error) => {
+  runtimeLog("error", "uncaught_exception", errorLogFields(error));
+  process.exit(1);
 });

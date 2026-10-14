@@ -3,6 +3,7 @@ import {
   db,
 } from "../../miroadmap-schema/src/prisma/db.ts";
 import { calculateRoadmapProgress } from "../domain/roadmap-progress.ts";
+import { getAvatarPublicUrl } from "../lib/avatar-storage.ts";
 import type { RoadmapRecord } from "./roadmaps.ts";
 import {
   getPersonalizedRoadmapAtVersion,
@@ -41,6 +42,15 @@ export type RoadmapLearningState = {
   followerCount: number;
   updateAvailable: boolean;
   progress: RoadmapProgressRecord | null;
+};
+
+export type RoadmapFollowerSummary = {
+  followerCount: number;
+  followers: Array<{
+    id: string;
+    fullName: string;
+    avatarUrl: string | null;
+  }>;
 };
 
 export type FollowedRoadmapRecord = {
@@ -103,6 +113,36 @@ async function followerCount(roadmapId: string): Promise<number> {
     .where({ roadmapId })
     .aggregate((value) => ({ count: value.count() }));
   return aggregate.count;
+}
+
+export async function getRoadmapFollowerSummary(
+  identifier: string,
+): Promise<RoadmapFollowerSummary> {
+  await connectDatabase();
+  const roadmap = await resolvePublishedRoadmap(identifier);
+  const [count, follows] = await Promise.all([
+    followerCount(roadmap.id),
+    db.orm.public.RoadmapFollow
+      .select("userId")
+      .where({ roadmapId: roadmap.id })
+      .orderBy((follow) => follow.followedAt.asc())
+      .limit(20)
+      .all(),
+  ]);
+  const users = await Promise.all(follows.map((follow) => (
+    db.orm.public.User
+      .select("id", "fullName", "avatarPath")
+      .first({ id: follow.userId, status: "ACTIVE" })
+  )));
+
+  return {
+    followerCount: count,
+    followers: users.flatMap((user) => user ? [{
+      id: user.id,
+      fullName: user.fullName,
+      avatarUrl: getAvatarPublicUrl(user.avatarPath ?? null),
+    }] : []).slice(0, 4),
+  };
 }
 
 export async function getRoadmapLearningState(
