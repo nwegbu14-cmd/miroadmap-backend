@@ -13,10 +13,19 @@ export type RoadmapAssetInput = {
   kind: "image" | "video";
 };
 
+export type RoadmapLinkInput = string | { url: string; label?: string };
+
+export function officialLinkData(link: RoadmapLinkInput) {
+  return {
+    url: typeof link === "string" ? link : link.url,
+    label: (typeof link === "string" ? "" : link.label?.trim()) || "Official link",
+  };
+}
+
 export type RoadmapTaskInput = {
   id: string;
   title: string;
-  links: string[];
+  links: RoadmapLinkInput[];
   assets: RoadmapAssetInput[];
   source?: "curated" | "ai";
   required?: boolean;
@@ -346,12 +355,11 @@ export async function createRoadmapDraft(
         });
 
         let resourcePosition = 1;
-        for (const url of task.links) {
+        for (const link of task.links) {
           await tx.orm.public.TaskResource.create({
             taskId: createdTask.id,
             kind: "LINK",
-            label: "Official link",
-            url,
+            ...officialLinkData(link),
             position: resourcePosition++,
           });
         }
@@ -395,6 +403,60 @@ export async function createRoadmapDraft(
       },
       version,
     );
+  });
+}
+
+export async function deleteOwnedRoadmap(
+  roadmapId: string,
+  userId: string,
+): Promise<void> {
+  await connectDatabase();
+
+  const roadmap = await db.orm.public.Roadmap
+    .select("id", "title", "authorId", "origin")
+    .first({ id: roadmapId });
+
+  if (!roadmap) throw new RoadmapMutationError("Roadmap not found", 404);
+  if (String(roadmap.authorId) !== userId) {
+    throw new RoadmapMutationError("You can only delete your own roadmap", 403);
+  }
+  if (roadmap.origin === "OFFICIAL") {
+    throw new RoadmapMutationError("Official roadmaps must be managed from the admin panel", 403);
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.orm.public.Roadmap.where({ id: roadmapId }).delete();
+    await tx.orm.public.UserActivity.create({
+      userId,
+      action: "ROADMAP_DELETED",
+      metadata: { roadmapId, title: roadmap.title },
+    });
+  });
+}
+
+export async function deleteRoadmapAsAdmin(
+  roadmapId: string,
+  actorId: string,
+): Promise<void> {
+  await connectDatabase();
+
+  const roadmap = await db.orm.public.Roadmap
+    .select("id", "title")
+    .first({ id: roadmapId });
+
+  if (!roadmap) throw new RoadmapMutationError("Roadmap not found", 404);
+
+  await db.transaction(async (tx) => {
+    await tx.orm.public.Roadmap.where({ id: roadmapId }).delete();
+    await tx.orm.public.UserActivity.create({
+      userId: actorId,
+      action: "ROADMAP_DELETED",
+      metadata: {
+        roadmapId,
+        title: roadmap.title,
+        source: "SUPER_ADMIN",
+      },
+    });
   });
 }
 
@@ -478,12 +540,11 @@ export async function updateRoadmapDraft(
         });
 
         let resourcePosition = 1;
-        for (const url of task.links) {
+        for (const link of task.links) {
           await tx.orm.public.TaskResource.create({
             taskId: createdTask.id,
             kind: "LINK",
-            label: "Official link",
-            url,
+            ...officialLinkData(link),
             position: resourcePosition++,
           });
         }
@@ -1236,12 +1297,11 @@ export async function upsertFeaturedRoadmap(seed: FeaturedRoadmapSeed): Promise<
           source: task.source === "ai" ? "AI" : "CURATED",
         });
         let resourcePosition = 1;
-        for (const url of task.links) {
+        for (const link of task.links) {
           await tx.orm.public.TaskResource.create({
             taskId: createdTask.id,
             kind: "LINK",
-            label: "Official link",
-            url,
+            ...officialLinkData(link),
             position: resourcePosition++,
           });
         }

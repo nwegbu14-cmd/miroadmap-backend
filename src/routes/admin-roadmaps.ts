@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import { getAdminRoadmapOverview } from "../db/admin-roadmaps.ts";
 import {
+  deleteRoadmapAsAdmin,
   getAdminRoadmap,
   publishRoadmapAsAdmin,
   RoadmapMutationError,
@@ -57,6 +58,27 @@ adminRoadmapsRouter.get(
       return;
     }
     response.json({ roadmap });
+  },
+);
+
+adminRoadmapsRouter.delete(
+  "/:roadmapId",
+  authenticate,
+  requireRoles("SUPER_ADMIN"),
+  async (request, response) => {
+    try {
+      await deleteRoadmapAsAdmin(
+        String(request.params.roadmapId ?? ""),
+        request.appUser!.id,
+      );
+      response.json({ deleted: true });
+    } catch (error) {
+      if (error instanceof RoadmapMutationError) {
+        response.status(error.status).json({ error: error.message });
+        return;
+      }
+      throw error;
+    }
   },
 );
 

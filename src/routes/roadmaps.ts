@@ -2,6 +2,7 @@ import { Router } from "express";
 
 import {
   createRoadmapDraft,
+  deleteOwnedRoadmap,
   getOwnedRoadmap,
   getPublishedRoadmap,
   incrementPublishedRoadmapViewCount,
@@ -13,6 +14,7 @@ import {
   updateRoadmapDraft,
   type CreateRoadmapInput,
   type RoadmapAssetInput,
+  type RoadmapLinkInput,
   type RoadmapStepInput,
   type RoadmapTaskInput,
 } from "../db/roadmaps.ts";
@@ -78,8 +80,19 @@ function parseTask(value: unknown, fallbackId: string): string | RoadmapTaskInpu
   const source = value as Record<string, unknown>;
   const title = text(source.title).slice(0, 240);
   if (!title) return null;
-  const links = Array.isArray(source.links)
-    ? source.links.map(text).filter(validHttpUrl).slice(0, 20)
+  const links: RoadmapLinkInput[] = Array.isArray(source.links)
+    ? source.links.flatMap((link): RoadmapLinkInput[] => {
+        if (typeof link === "string") {
+          const url = text(link);
+          return validHttpUrl(url) ? [url] : [];
+        }
+        if (!link || typeof link !== "object") return [];
+        const candidate = link as Record<string, unknown>;
+        const url = text(candidate.url);
+        if (!validHttpUrl(url)) return [];
+        const label = text(candidate.label).slice(0, 160);
+        return [label ? { url, label } : url];
+      }).slice(0, 20)
     : [];
   const assets: RoadmapAssetInput[] = Array.isArray(source.assets)
     ? source.assets.flatMap((asset, index) => {
@@ -424,6 +437,22 @@ roadmapsRouter.put("/:roadmapId", authenticate, activeRoles, async (request, res
       request.appUser!,
     );
     response.json({ roadmap });
+  } catch (error) {
+    if (error instanceof RoadmapMutationError) {
+      response.status(error.status).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+});
+
+roadmapsRouter.delete("/:roadmapId", authenticate, activeRoles, async (request, response) => {
+  try {
+    await deleteOwnedRoadmap(
+      String(request.params.roadmapId ?? ""),
+      request.appUser!.id,
+    );
+    response.json({ deleted: true });
   } catch (error) {
     if (error instanceof RoadmapMutationError) {
       response.status(error.status).json({ error: error.message });
