@@ -151,6 +151,30 @@ export async function getStripeCheckoutStatus(userId: string, sessionId: string)
   if (session.client_reference_id !== userId && session.metadata?.userId !== userId) {
     throw new BillingProviderError("Checkout session not found", 404);
   }
+
+  // Do not make Premium activation depend solely on webhook delivery. Stripe can
+  // redirect the customer back before the webhook reaches us (and local/test
+  // webhooks are especially easy to miss), so reconcile the completed Checkout
+  // Session while the authenticated customer is checking its status. Webhooks
+  // remain responsible for renewals, cancellations, and later status changes.
+  if (session.status === "complete") {
+    const providerSubId = objectId(session.subscription);
+    if (!providerSubId) {
+      throw new BillingProviderError(
+        "Stripe completed checkout without creating a subscription",
+        502,
+      );
+    }
+
+    const subscription = await getStripe().subscriptions.retrieve(providerSubId);
+    if (subscription.metadata.userId !== userId) {
+      throw new BillingProviderError("Checkout subscription not found", 404);
+    }
+
+    await connectDatabase();
+    await syncSubscription(subscription);
+  }
+
   return {
     status: session.status,
     paymentStatus: session.payment_status,
