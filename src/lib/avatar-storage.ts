@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "./supabase.ts";
 
 export const AVATAR_BUCKET = "avatars";
-export const MAX_AVATAR_BYTES = 768 * 1024;
+// Client uploads target about 150 KB. This slightly higher hard limit allows
+// for normal encoder variance while keeping avatar payloads appropriately small.
+export const MAX_AVATAR_BYTES = 256 * 1024;
 
 const allowedMimeTypes = ["image/jpeg", "image/png", "image/webp"] as const;
 type AvatarMimeType = (typeof allowedMimeTypes)[number];
@@ -56,7 +58,7 @@ export function decodeAvatar(
   const bytes = Buffer.from(contentBase64, "base64");
   const typedMime = mimeType as AvatarMimeType;
   if (bytes.length === 0 || bytes.length > MAX_AVATAR_BYTES) {
-    throw new Error("Avatar must be smaller than 768 KB after compression");
+    throw new Error("Avatar must be smaller than 256 KB after compression");
   }
   if (!hasExpectedSignature(bytes, typedMime)) {
     throw new Error("Avatar contents do not match the selected image type");

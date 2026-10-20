@@ -22,7 +22,11 @@ adminStoriesRouter.get("/", async (_request, response) => {
 
 adminStoriesRouter.post("/images", async (request, response) => {
   try {
-    const { bytes, mimeType } = decodeStoryImage(request.body?.contentBase64, request.body?.mimeType);
+    const { bytes, mimeType } = decodeStoryImage(
+      request.body?.contentBase64,
+      request.body?.mimeType,
+      request.body?.variant,
+    );
     const path = await uploadStoryImage(request.appUser!.id, bytes, mimeType);
     response.status(201).json({ path, url: getStoryImagePublicUrl(path) });
   } catch (error) {

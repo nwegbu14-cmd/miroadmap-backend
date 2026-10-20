@@ -3,7 +3,7 @@ import test from "node:test";
 import { officialLinkData, type CreateRoadmapInput, type RoadmapTaskInput } from "../db/roadmaps.ts";
 import { parseRoadmapInput } from "./roadmaps.ts";
 
-function parseTaskLinks(links: unknown[]): CreateRoadmapInput {
+function parseTaskLinks(links: unknown[], extra: Record<string, unknown> = {}): CreateRoadmapInput {
   const result = parseRoadmapInput({
     title: "Language test roadmap",
     shortDescription: "Get ready to book a test.",
@@ -13,6 +13,7 @@ function parseTaskLinks(links: unknown[]): CreateRoadmapInput {
       title: `Step ${index + 1}`,
       checklist: [{ id: `task-${index + 1}`, title: "Book a test", links, assets: [] }],
     })),
+    ...extra,
   });
   assert.notEqual(typeof result, "string");
   if (typeof result === "string") throw new Error(result);
@@ -68,4 +69,43 @@ test("the existing twenty-link limit applies to mixed named and unnamed links", 
     ? { url: `https://example.com/${index}`, label: `Link ${index}` }
     : `https://example.com/${index}`);
   assert.equal(firstTask(parseTaskLinks(links)).links.length, 20);
+});
+
+test("verification evidence keeps safe image metadata and HTTP links", () => {
+  const input = parseTaskLinks([], {
+    requestVerification: true,
+    verificationEvidence: [
+      {
+        kind: "image",
+        name: " permit.png ",
+        storagePath: "user-1/evidence.png",
+        mimeType: "image/png",
+        sizeBytes: 12_345,
+      },
+      { kind: "link", label: " Official result ", url: "https://example.com/result" },
+      { kind: "link", label: "Unsafe", url: "javascript:alert(1)" },
+    ],
+  });
+
+  assert.deepEqual(input.verificationEvidence, [
+    {
+      kind: "image",
+      name: "permit.png",
+      storagePath: "user-1/evidence.png",
+      mimeType: "image/png",
+      sizeBytes: 12_345,
+    },
+    { kind: "link", label: "Official result", url: "https://example.com/result" },
+  ]);
+});
+
+test("verification evidence rejects oversized images and unsupported file types", () => {
+  const input = parseTaskLinks([], {
+    requestVerification: true,
+    verificationEvidence: [
+      { kind: "image", name: "large.png", storagePath: "user-1/large.png", mimeType: "image/png", sizeBytes: 4 * 1024 * 1024 },
+      { kind: "image", name: "document.pdf", storagePath: "user-1/document.pdf", mimeType: "application/pdf", sizeBytes: 100 },
+    ],
+  });
+  assert.deepEqual(input.verificationEvidence, []);
 });

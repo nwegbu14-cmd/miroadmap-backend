@@ -3,10 +3,19 @@ import { randomUUID } from "node:crypto";
 import { getSupabaseAdmin } from "./supabase.ts";
 
 export const STORY_IMAGE_BUCKET = "story-images";
-export const MAX_STORY_IMAGE_BYTES = 5 * 1024 * 1024;
+// Full story images target 450 KB and listing covers target 350 KB. Keep a
+// small amount of headroom for browser encoder variance while rejecting raw,
+// unoptimized uploads that bypass the admin client.
+export const MAX_STORY_IMAGE_BYTES = 512 * 1024;
 
 const allowedMimeTypes = ["image/jpeg", "image/png", "image/webp"] as const;
 export type StoryImageMimeType = (typeof allowedMimeTypes)[number];
+export type StoryImageVariant = "detail" | "listing";
+
+const storyImageDimensions: Record<StoryImageVariant, { width: number; height: number }> = {
+  detail: { width: 1280, height: 460 },
+  listing: { width: 1218, height: 580 },
+};
 
 function extensionFor(mimeType: StoryImageMimeType): string {
   if (mimeType === "image/png") return "png";
@@ -24,6 +33,51 @@ function hasExpectedSignature(bytes: Buffer, mimeType: StoryImageMimeType): bool
   return bytes.length >= 12
     && bytes.subarray(0, 4).toString("ascii") === "RIFF"
     && bytes.subarray(8, 12).toString("ascii") === "WEBP";
+}
+
+function readUint24LE(bytes: Buffer, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16);
+}
+
+function readWebpDimensions(bytes: Buffer): { width: number; height: number } | null {
+  if (!hasExpectedSignature(bytes, "image/webp")) return null;
+
+  let offset = 12;
+  while (offset + 8 <= bytes.length) {
+    const chunkType = bytes.subarray(offset, offset + 4).toString("ascii");
+    const chunkSize = bytes.readUInt32LE(offset + 4);
+    const dataOffset = offset + 8;
+    if (dataOffset + chunkSize > bytes.length) return null;
+
+    if (chunkType === "VP8X" && chunkSize >= 10) {
+      return {
+        width: readUint24LE(bytes, dataOffset + 4) + 1,
+        height: readUint24LE(bytes, dataOffset + 7) + 1,
+      };
+    }
+    if (chunkType === "VP8 " && chunkSize >= 10
+      && bytes[dataOffset + 3] === 0x9d
+      && bytes[dataOffset + 4] === 0x01
+      && bytes[dataOffset + 5] === 0x2a) {
+      return {
+        width: bytes.readUInt16LE(dataOffset + 6) & 0x3fff,
+        height: bytes.readUInt16LE(dataOffset + 8) & 0x3fff,
+      };
+    }
+    if (chunkType === "VP8L" && chunkSize >= 5 && bytes[dataOffset] === 0x2f) {
+      const b1 = bytes[dataOffset + 1];
+      const b2 = bytes[dataOffset + 2];
+      const b3 = bytes[dataOffset + 3];
+      const b4 = bytes[dataOffset + 4];
+      return {
+        width: 1 + b1 + ((b2 & 0x3f) << 8),
+        height: 1 + (b2 >> 6) + (b3 << 2) + ((b4 & 0x0f) << 10),
+      };
+    }
+
+    offset = dataOffset + chunkSize + (chunkSize % 2);
+  }
+  return null;
 }
 
 async function ensureStoryImageBucket(): Promise<void> {
@@ -45,7 +99,14 @@ async function ensureStoryImageBucket(): Promise<void> {
 export function decodeStoryImage(
   contentBase64: unknown,
   mimeType: unknown,
+  variant: unknown,
 ): { bytes: Buffer; mimeType: StoryImageMimeType } {
+  if (variant !== "detail" && variant !== "listing") {
+    throw new Error("Choose whether this is a full story image or stories display cover");
+  }
+  if (mimeType !== "image/webp") {
+    throw new Error("Story images must be optimized to WebP before upload");
+  }
   if (typeof mimeType !== "string" || !allowedMimeTypes.includes(mimeType as StoryImageMimeType)) {
     throw new Error("Story images must be JPEG, PNG, or WebP files");
   }
@@ -56,10 +117,15 @@ export function decodeStoryImage(
   const bytes = Buffer.from(contentBase64, "base64");
   const typedMime = mimeType as StoryImageMimeType;
   if (bytes.length === 0 || bytes.length > MAX_STORY_IMAGE_BYTES) {
-    throw new Error("Story images must be smaller than 5 MB");
+    throw new Error("Story images must be smaller than 512 KB after optimization");
   }
   if (!hasExpectedSignature(bytes, typedMime)) {
     throw new Error("Story image contents do not match the selected file type");
+  }
+  const dimensions = readWebpDimensions(bytes);
+  const expected = storyImageDimensions[variant];
+  if (!dimensions || dimensions.width !== expected.width || dimensions.height !== expected.height) {
+    throw new Error(`Story ${variant} images must be exactly ${expected.width} × ${expected.height}`);
   }
   return { bytes, mimeType: typedMime };
 }

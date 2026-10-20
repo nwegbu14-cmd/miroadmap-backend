@@ -17,6 +17,7 @@ import {
   type RoadmapLinkInput,
   type RoadmapStepInput,
   type RoadmapTaskInput,
+  type VerificationEvidenceInput,
 } from "../db/roadmaps.ts";
 import {
   followRoadmap,
@@ -37,6 +38,10 @@ import {
   uploadRoadmapImage,
 } from "../lib/roadmap-storage.ts";
 import { roadmapAiRouter } from "./roadmap-ai.ts";
+import {
+  decodeVerificationEvidenceImage,
+  uploadVerificationEvidenceImage,
+} from "../lib/verification-evidence-storage.ts";
 
 export const roadmapsRouter = Router();
 
@@ -184,6 +189,37 @@ export function parseRoadmapInput(value: unknown): CreateRoadmapInput | string {
     return "Uploaded images are too large for one roadmap. Remove an image and try again";
   }
 
+  const verificationEvidence: VerificationEvidenceInput[] = Array.isArray(source.verificationEvidence)
+    ? source.verificationEvidence.flatMap((rawEvidence): VerificationEvidenceInput[] => {
+        if (!rawEvidence || typeof rawEvidence !== "object") return [];
+        const evidence = rawEvidence as Record<string, unknown>;
+        if (evidence.kind === "link") {
+          const url = text(evidence.url);
+          if (!validHttpUrl(url)) return [];
+          return [{
+            kind: "link",
+            label: text(evidence.label).slice(0, 160) || new URL(url).hostname,
+            url: url.slice(0, 2_000),
+          }];
+        }
+        if (evidence.kind !== "image") return [];
+        const mimeType = text(evidence.mimeType);
+        if (mimeType !== "image/jpeg" && mimeType !== "image/png" && mimeType !== "image/webp") return [];
+        const storagePath = text(evidence.storagePath).slice(0, 500);
+        const sizeBytes = Number(evidence.sizeBytes);
+        if (!storagePath || !Number.isInteger(sizeBytes) || sizeBytes <= 0 || sizeBytes > 3 * 1024 * 1024) return [];
+        return [{
+          kind: "image",
+          name: text(evidence.name).slice(0, 200) || "Evidence image",
+          storagePath,
+          mimeType,
+          sizeBytes,
+        }];
+      }).slice(0, 20)
+    : [];
+
+  const requestVerification = source.requestVerification === true;
+
   return {
     title,
     shortDescription,
@@ -198,7 +234,8 @@ export function parseRoadmapInput(value: unknown): CreateRoadmapInput | string {
     attribution: source.attribution === "anonymous" ? "anonymous" : "name",
     aiAssistance: source.aiAssistance !== false,
     audience: text(source.audience).slice(0, 120),
-    requestVerification: source.requestVerification === true,
+    requestVerification,
+    verificationEvidence,
   };
 }
 
@@ -266,6 +303,21 @@ roadmapsRouter.post("/images", authenticate, activeRoles, async (request, respon
   } catch (error) {
     response.status(400).json({
       error: error instanceof Error ? error.message : "Invalid roadmap image",
+    });
+  }
+});
+
+roadmapsRouter.post("/verification-evidence/images", authenticate, activeRoles, async (request, response) => {
+  try {
+    const { bytes, mimeType } = decodeVerificationEvidenceImage(
+      request.body?.contentBase64,
+      request.body?.mimeType,
+    );
+    const path = await uploadVerificationEvidenceImage(request.appUser!.id, bytes, mimeType);
+    response.status(201).json({ path, mimeType, sizeBytes: bytes.length });
+  } catch (error) {
+    response.status(400).json({
+      error: error instanceof Error ? error.message : "Invalid verification evidence image",
     });
   }
 });

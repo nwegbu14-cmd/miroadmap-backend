@@ -15,6 +15,20 @@ export type RoadmapAssetInput = {
 
 export type RoadmapLinkInput = string | { url: string; label?: string };
 
+export type VerificationEvidenceInput =
+  | {
+      kind: "image";
+      name: string;
+      storagePath: string;
+      mimeType: "image/jpeg" | "image/png" | "image/webp";
+      sizeBytes: number;
+    }
+  | {
+      kind: "link";
+      label: string;
+      url: string;
+    };
+
 export function officialLinkData(link: RoadmapLinkInput) {
   return {
     url: typeof link === "string" ? link : link.url,
@@ -54,6 +68,7 @@ export type CreateRoadmapInput = {
   aiAssistance: boolean;
   audience: string;
   requestVerification: boolean;
+  verificationEvidence: VerificationEvidenceInput[];
 };
 
 export type FeaturedRoadmapSeed = CreateRoadmapInput & {
@@ -84,6 +99,7 @@ export type RoadmapRecord = {
   aiAssistance: boolean;
   audience: string;
   requestVerification: boolean;
+  verificationEvidence: VerificationEvidenceInput[];
   origin: "official" | "community";
   isVerified: boolean;
   viewCount: number;
@@ -214,6 +230,9 @@ function toRoadmapRecord(
     aiAssistance: snapshot.aiAssistance,
     audience: snapshot.audience,
     requestVerification: snapshot.requestVerification === true,
+    verificationEvidence: Array.isArray(snapshot.verificationEvidence)
+      ? snapshot.verificationEvidence
+      : [],
     origin: row.origin === "OFFICIAL" ? "official" : "community",
     isVerified: row.isVerified === true,
     viewCount: row.viewCount ?? 0,
@@ -684,6 +703,15 @@ export async function publishRoadmap(
   if (!version || !snapshot) {
     throw new RoadmapMutationError("The saved roadmap content is invalid", 409);
   }
+  const verificationEvidence = (snapshot.verificationEvidence ?? []).filter((evidence) =>
+    evidence.kind === "link" || evidence.storagePath.startsWith(`${userId}/`)
+  );
+  if (snapshot.requestVerification && verificationEvidence.length === 0) {
+    throw new RoadmapMutationError(
+      "Add at least one evidence image or link before requesting verification",
+      400,
+    );
+  }
   const roadmapUpdatedAt = roadmap.updatedAt;
   const instantFactory = roadmapUpdatedAt.constructor as {
     from(value: string): typeof roadmapUpdatedAt;
@@ -721,6 +749,10 @@ export async function publishRoadmap(
       currentVersionId: version.id,
       publishedVersionId: version.id,
       draftVersionId: null,
+      // Community publication and verification are deliberately separate.
+      // Every newly published community version is visible but unverified
+      // until an admin approves its verification request.
+      isVerified: roadmap.origin === "OFFICIAL" ? roadmap.isVerified : false,
       // TODO(media-moderation): replace this temporary approval with the
       // Sightengine result before enabling production media uploads.
       moderationStatus: "APPROVED",
@@ -736,13 +768,37 @@ export async function publishRoadmap(
     }
 
     if (snapshot.requestVerification) {
-      const existingRequest = await tx.orm.public.VerificationRequest
+      const existingPendingRequest = await tx.orm.public.VerificationRequest
         .select("id")
-        .first({ roadmapId, requesterId: userId });
-      if (!existingRequest) {
+        .first({ roadmapId, requesterId: userId, status: "PENDING" });
+      const existingInReviewRequest = existingPendingRequest
+        ? null
+        : await tx.orm.public.VerificationRequest
+            .select("id")
+            .first({ roadmapId, requesterId: userId, status: "IN_REVIEW" });
+      if (!existingPendingRequest && !existingInReviewRequest) {
         const verificationRequest = await tx.orm.public.VerificationRequest
           .select("id")
           .create({ roadmapId, requesterId: userId });
+        for (const evidence of verificationEvidence) {
+          if (evidence.kind === "image") {
+            await tx.orm.public.EvidenceFile.create({
+              requestId: verificationRequest.id,
+              fileName: evidence.name,
+              storagePath: evidence.storagePath,
+              mimeType: evidence.mimeType,
+              sizeBytes: evidence.sizeBytes,
+            });
+          } else {
+            await tx.orm.public.EvidenceFile.create({
+              requestId: verificationRequest.id,
+              fileName: evidence.label,
+              storagePath: evidence.url,
+              mimeType: "text/uri-list",
+              sizeBytes: 0,
+            });
+          }
+        }
         const [admins, superAdmins] = await Promise.all([
           tx.orm.public.User.select("id").where({ role: "ADMIN", status: "ACTIVE" }).all(),
           tx.orm.public.User.select("id").where({ role: "SUPER_ADMIN", status: "ACTIVE" }).all(),
@@ -757,7 +813,7 @@ export async function publishRoadmap(
             priority: "NORMAL",
             title: "New verification request",
             body: `“${snapshot.title}” was submitted for verification.`,
-            href: `/admin/verification/${verificationRequest.id}`,
+            href: "/admin/verification",
             entityType: "VERIFICATION_REQUEST",
             entityId: verificationRequest.id,
             metadata: { roadmapId },

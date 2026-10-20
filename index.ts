@@ -7,6 +7,7 @@ import { adminRoadmapsRouter } from "./src/routes/admin-roadmaps.ts";
 import { adminStoriesRouter } from "./src/routes/admin-stories.ts";
 import { adminFeedbackRouter } from "./src/routes/admin-feedback.ts";
 import { adminUsersRouter } from "./src/routes/admin-users.ts";
+import { adminVerificationsRouter } from "./src/routes/admin-verifications.ts";
 import { authRouter } from "./src/routes/auth.ts";
 import { billingRouter, stripeWebhookHandler } from "./src/routes/billing.ts";
 import {
@@ -89,6 +90,7 @@ app.use("/api/admin/feedback", adminFeedbackRouter);
 app.use("/api/admin/roadmaps", adminRoadmapsRouter);
 app.use("/api/admin/stories", adminStoriesRouter);
 app.use("/api/admin/users", adminUsersRouter);
+app.use("/api/admin/verifications", adminVerificationsRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/notification-preferences", notificationPreferencesRouter);
 app.use("/api/roadmaps", roadmapsRouter);
