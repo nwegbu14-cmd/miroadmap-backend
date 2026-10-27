@@ -31,6 +31,7 @@ import {
   unfollowRoadmap,
 } from "../db/roadmap-learning.ts";
 import { authenticate, requireRoles } from "../middleware/auth.ts";
+import { platformTaskXp } from "../domain/roadmap-progress.ts";
 import { createRateLimit } from "../middleware/rate-limit.ts";
 import {
   decodeRoadmapImage,
@@ -115,7 +116,6 @@ function parseTask(value: unknown, fallbackId: string): string | RoadmapTaskInpu
       }).slice(0, 20)
     : [];
 
-  const requestedXp = Number(source.xp);
   const required = source.required !== false;
   return {
     id: text(source.id) || fallbackId,
@@ -124,9 +124,8 @@ function parseTask(value: unknown, fallbackId: string): string | RoadmapTaskInpu
     assets,
     source: source.source === "ai" ? "ai" : "curated",
     required,
-    xp: Number.isFinite(requestedXp)
-      ? Math.max(0, Math.min(1_000, Math.round(requestedXp)))
-      : required ? 10 : 5,
+    // XP is platform-defined (docs/XP_SYSTEM.md); author-supplied values are ignored.
+    xp: platformTaskXp(required),
   };
 }
 

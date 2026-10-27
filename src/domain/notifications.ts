@@ -37,6 +37,32 @@ export type NotificationListOptions = {
   unreadOnly: boolean;
 };
 
+// Categories without an entry (account, AI, system) are always delivered.
+const preferenceKeyByCategory: Partial<Record<string, NotificationPreferenceKey>> = {
+  ROADMAP: "roadmapActivity",
+  VERIFICATION: "verification",
+  COMMUNITY: "community",
+  ACHIEVEMENT: "achievements",
+  DEADLINE: "deadlines",
+  BILLING: "billing",
+  SUPPORT: "support",
+  PRODUCT: "productNews",
+};
+
+export function preferenceKeyForCategory(category: string): NotificationPreferenceKey | null {
+  return preferenceKeyByCategory[category] ?? null;
+}
+
+export function isNotificationAllowed(
+  preferences: NotificationPreferences,
+  category: string,
+  priority: string,
+): boolean {
+  if (priority === "CRITICAL") return true;
+  const key = preferenceKeyForCategory(category);
+  return key ? preferences[key] : true;
+}
+
 function firstQueryValue(value: unknown): string {
   if (Array.isArray(value)) return String(value[0] ?? "").trim();
   return typeof value === "string" ? value.trim() : "";

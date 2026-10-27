@@ -9,6 +9,7 @@ import {
   getPersonalizedRoadmapAtVersion,
   getPersonalizedTaskSlots,
 } from "./roadmap-ai.ts";
+import { userAcceptsNotification } from "./notifications.ts";
 
 export class RoadmapLearningError extends Error {
   constructor(
@@ -383,7 +384,7 @@ export async function acceptRoadmapUpdate(userId: string, identifier: string) {
     if (personalization) {
       await tx.orm.public.RoadmapDelta
         .where({ personalizationId: personalization.id, status: "ACTIVE" })
-        .update({ status: "ORPHANED" });
+        .updateAndCount({ status: "ORPHANED" });
       await tx.orm.public.RoadmapPersonalization.where({ id: personalization.id }).update({
         baseVersionId: roadmap.publishedVersionId,
         rebasedAt: now,
@@ -492,49 +493,111 @@ export async function setTaskCompletion(input: {
     return getRoadmapLearningState(input.userId, roadmap.id);
   }
 
+  const existingCompletions = await db.orm.public.TaskCompletion
+    .select("taskId", "deltaId")
+    .where({ progressId: progress.id })
+    .all();
+  const previouslyCompletedIds = new Set(existingCompletions.flatMap((item) =>
+    [item.taskId, item.deltaId].filter(Boolean) as string[]
+  ));
+  const previousCalculated = calculateRoadmapProgress(tasks, previouslyCompletedIds);
+  const currentStepPosition = steps.find((step) => step.id === previousCalculated.currentStepId)?.position;
+  if (input.completed && currentStepPosition && targetStep.position > currentStepPosition) {
+    throw new RoadmapLearningError("Complete the current step before starting a later step", 409);
+  }
+
   const progressRecord = progress;
   const temporalFactory = progressRecord.startedAt.constructor as {
     from(value: string): typeof progressRecord.startedAt;
   };
   const now = temporalFactory.from(new Date().toISOString());
 
-  await db.transaction(async (tx) => {
-    if (input.completed) {
-      await tx.orm.public.TaskCompletion.create({
-        progressId: progressRecord.id,
-        taskId: targetTask.taskId,
-        deltaId: targetTask.deltaId,
-        completedAt: now,
+  try {
+    await db.transaction(async (tx) => {
+      if (input.completed) {
+        await tx.orm.public.TaskCompletion.create({
+          progressId: progressRecord.id,
+          taskId: targetTask.taskId,
+          deltaId: targetTask.deltaId,
+          completedAt: now,
+        });
+      } else if (existingCompletion) {
+        await tx.orm.public.TaskCompletion.where({ id: existingCompletion.id }).delete();
+      }
+
+      const completions = await tx.orm.public.TaskCompletion
+        .select("taskId", "deltaId")
+        .where({ progressId: progressRecord.id })
+        .all();
+      const completedIds = new Set(completions.flatMap((item) =>
+        [item.taskId, item.deltaId].filter(Boolean) as string[]
+      ));
+      const calculated = calculateRoadmapProgress(tasks, completedIds);
+      const completedAt = calculated.isComplete ? (progressRecord.completedAt ?? now) : null;
+
+      await tx.orm.public.RoadmapProgress.where({ id: progressRecord.id }).update({
+        currentStepId: calculated.currentStepId,
+        percentComplete: calculated.percentComplete,
+        xpEarned: calculated.xpEarned,
+        lastActivityAt: now,
+        completedAt,
       });
-    } else if (existingCompletion) {
-      await tx.orm.public.TaskCompletion.where({ id: existingCompletion.id }).delete();
-    }
-
-    const completions = await tx.orm.public.TaskCompletion
-      .select("taskId", "deltaId")
-      .where({ progressId: progressRecord.id })
-      .all();
-    const completedIds = new Set(completions.flatMap((item) =>
-      [item.taskId, item.deltaId].filter(Boolean) as string[]
-    ));
-    const calculated = calculateRoadmapProgress(tasks, completedIds);
-    const completedAt = calculated.isComplete ? (progressRecord.completedAt ?? now) : null;
-
-    await tx.orm.public.RoadmapProgress.where({ id: progressRecord.id }).update({
-      currentStepId: calculated.currentStepId,
-      percentComplete: calculated.percentComplete,
-      xpEarned: calculated.xpEarned,
-      lastActivityAt: now,
-      completedAt,
+      const newlyCompletedStep = calculated.completedStepIds.includes(targetStep.id)
+        && !previousCalculated.completedStepIds.includes(targetStep.id);
+      if (newlyCompletedStep && await userAcceptsNotification(tx, input.userId, "ACHIEVEMENT")) {
+        const dedupeKey = `roadmap-step-completed:${progressRecord.id}:${follow.versionId}:${targetStep.id}`;
+        await tx.orm.public.Notification.upsert({
+          create: {
+            userId: input.userId,
+            type: "ROADMAP_STEP_COMPLETED",
+            category: "ACHIEVEMENT",
+            priority: "NORMAL",
+            title: "Step completed",
+            body: `You completed “${targetStep.title}” and earned a 20 XP step bonus.`,
+            href: `/user-dashboard/roadmaps/${roadmap.id}`,
+            entityType: "ROADMAP_STEP",
+            entityId: targetStep.id,
+            metadata: { roadmapId: roadmap.id, versionId: follow.versionId, stepPosition: targetStep.position },
+            dedupeKey,
+            groupKey: `roadmap-achievements:${roadmap.id}`,
+          },
+          update: { dedupeKey },
+          conflictOn: { dedupeKey },
+        });
+      }
+      if (calculated.isComplete && !progressRecord.completedAt) {
+        await tx.orm.public.UserActivity.create({
+          userId: input.userId,
+          action: "ROADMAP_COMPLETED",
+          metadata: { roadmapId: roadmap.id, versionId: follow.versionId, xpEarned: calculated.xpEarned },
+        });
+        if (await userAcceptsNotification(tx, input.userId, "ACHIEVEMENT")) {
+          const dedupeKey = `roadmap-completed:${progressRecord.id}:${follow.versionId}`;
+          await tx.orm.public.Notification.upsert({
+            create: {
+              userId: input.userId,
+              type: "ROADMAP_COMPLETED",
+              category: "ACHIEVEMENT",
+              priority: "HIGH",
+              title: "Roadmap completed",
+              body: "You completed every required task and earned a 50 XP completion bonus.",
+              href: `/user-dashboard/roadmaps/${roadmap.id}`,
+              entityType: "ROADMAP",
+              entityId: roadmap.id,
+              metadata: { roadmapId: roadmap.id, versionId: follow.versionId, xpEarned: calculated.xpEarned },
+              dedupeKey,
+              groupKey: `roadmap-achievements:${roadmap.id}`,
+            },
+            update: { dedupeKey },
+            conflictOn: { dedupeKey },
+          });
+        }
+      }
     });
-    if (calculated.isComplete && !progressRecord.completedAt) {
-      await tx.orm.public.UserActivity.create({
-        userId: input.userId,
-        action: "ROADMAP_COMPLETED",
-        metadata: { roadmapId: roadmap.id, versionId: follow.versionId, xpEarned: calculated.xpEarned },
-      });
-    }
-  });
+  } catch (error) {
+    // A concurrent request already recorded this completion (unique violation); the end state matches the request.
+    if ((error as { sqlState?: string }).sqlState !== "23505") throw error;
+  }
 
   return getRoadmapLearningState(input.userId, roadmap.id);
 }

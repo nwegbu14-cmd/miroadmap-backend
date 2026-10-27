@@ -1,3 +1,5 @@
+import { platformTaskXp } from "./roadmap-progress.ts";
+
 export const ROADMAP_TAILOR_PROMPT_KEY = "roadmap-tailor";
 export const ROADMAP_TAILOR_PROMPT_VERSION = 2;
 
@@ -110,7 +112,6 @@ export function parseRoadmapAiOutput(value: unknown): RoadmapAiOutput {
     const taskPosition = rawTaskPosition === null ? null : Number(rawTaskPosition);
     const title = cleanText(suggestion.title, 240);
     const rationale = cleanText(suggestion.rationale, 500);
-    const xp = Number(suggestion.xp);
 
     if (operation !== "ADD" && operation !== "UPDATE" && operation !== "REMOVE") {
       throw new Error("AI suggestion has an unsupported operation");
@@ -122,15 +123,13 @@ export function parseRoadmapAiOutput(value: unknown): RoadmapAiOutput {
     if (!title || !rationale || typeof suggestion.required !== "boolean") {
       throw new Error("AI suggestion is incomplete");
     }
-    if (!Number.isInteger(xp) || xp < 0 || xp > 1_000) throw new Error("AI suggestion has invalid XP");
-
     return {
       operation,
       stepPosition,
       taskPosition,
       title,
       required: suggestion.required,
-      xp,
+      xp: platformTaskXp(suggestion.required),
       rationale,
     } satisfies RoadmapAiChange;
   });

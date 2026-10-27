@@ -4,6 +4,7 @@ import {
 } from "../../miroadmap-schema/src/prisma/db.ts";
 import { stripePriceId } from "../lib/stripe.ts";
 import { getPaymentProviderSummary } from "./stripe-billing.ts";
+import { userAcceptsNotification } from "./notifications.ts";
 
 export type TesterPlanCode = "PREMIUM" | "ULTIMATE";
 export type TesterBillingInterval = "MONTH" | "YEAR";
@@ -247,7 +248,7 @@ export async function simulateTesterCheckout(input: {
 
     if (!subscription) throw new Error("Unable to persist the tester subscription");
 
-    await tx.orm.public.Invoice.create({
+    const invoice = await tx.orm.public.Invoice.select("id").create({
       subscriptionId: subscription.id,
       amountCents: plan.priceCents,
       discountCents: plan.priceCents,
@@ -282,6 +283,28 @@ export async function simulateTesterCheckout(input: {
         chargedCents: 0,
       },
     });
+
+    if (await userAcceptsNotification(tx, input.userId, "BILLING")) {
+      const dedupeKey = `billing:tester-invoice:${invoice.id}`;
+      await tx.orm.public.Notification.upsert({
+        create: {
+          userId: input.userId,
+          type: existing ? "SUBSCRIPTION_CHANGED" : "SUBSCRIPTION_STARTED",
+          category: "BILLING",
+          priority: "NORMAL",
+          title: existing ? "Tester plan updated" : "Tester plan activated",
+          body: `${plan.name} ${plan.interval.toLowerCase()} access is now active. No payment was charged.`,
+          href: "/user-dashboard/settings/manage-subscriptions",
+          entityType: "INVOICE",
+          entityId: invoice.id,
+          metadata: { planCode: input.planCode, interval: input.interval, chargedCents: 0 },
+          dedupeKey,
+          groupKey: "billing-subscription",
+        },
+        update: { dedupeKey },
+        conflictOn: { dedupeKey },
+      });
+    }
   });
 
   return getBillingOverview(input.userId);
@@ -309,11 +332,33 @@ export async function cancelTesterSubscription(userId: string) {
         .update({ planId: null });
     }
 
-    await tx.orm.public.UserActivity.create({
+    const activity = await tx.orm.public.UserActivity.select("id").create({
       userId,
       action: "TESTER_PLAN_CANCELED",
       metadata: { returnedTo: "FREE", chargedCents: 0 },
     });
+
+    if (await userAcceptsNotification(tx, userId, "BILLING")) {
+      const dedupeKey = `billing:tester-canceled:${activity.id}`;
+      await tx.orm.public.Notification.upsert({
+        create: {
+          userId,
+          type: "SUBSCRIPTION_CANCELED",
+          category: "BILLING",
+          priority: "NORMAL",
+          title: "Tester plan canceled",
+          body: "Your simulated paid plan has ended and your account returned to the free plan.",
+          href: "/user-dashboard/settings/manage-subscriptions",
+          entityType: "SUBSCRIPTION",
+          entityId: existing.id,
+          metadata: { returnedTo: "FREE", chargedCents: 0 },
+          dedupeKey,
+          groupKey: "billing-subscription",
+        },
+        update: { dedupeKey },
+        conflictOn: { dedupeKey },
+      });
+    }
   });
 
   return getBillingOverview(userId);

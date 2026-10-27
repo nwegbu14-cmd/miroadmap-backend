@@ -15,6 +15,7 @@ import {
 } from "../lib/stripe.ts";
 import type { AppUserIdentity } from "../types/express.d.ts";
 import type { TesterBillingInterval, TesterPlanCode } from "./billing.ts";
+import { createNotification } from "./notifications.ts";
 
 export class BillingProviderError extends Error {
   constructor(message: string, readonly status: number) {
@@ -188,7 +189,7 @@ async function syncSubscription(subscription: Stripe.Subscription) {
   if (!userId || !planId) throw new Error("Stripe subscription is missing MiRoadmap metadata");
 
   const existing = await db.orm.public.Subscription
-    .select("id", "createdAt")
+    .select("id", "planId", "status", "createdAt")
     .first({ userId });
   const customerId = objectId(subscription.customer);
   const firstItem = subscription.items.data[0];
@@ -219,6 +220,32 @@ async function syncSubscription(subscription: Stripe.Subscription) {
         : null,
     });
   }
+
+  const statusChanged = !existing || existing.status !== values.status || existing.planId !== planId;
+  if (statusChanged) {
+    const plan = await db.orm.public.Plan.select("name", "interval").first({ id: planId });
+    const type = values.status === "CANCELED"
+      ? "SUBSCRIPTION_CANCELED"
+      : existing ? "SUBSCRIPTION_CHANGED" : "SUBSCRIPTION_STARTED";
+    await createNotification({
+      userId,
+      type,
+      category: "BILLING",
+      priority: values.status === "PAST_DUE" ? "HIGH" : "NORMAL",
+      title: values.status === "CANCELED"
+        ? "Subscription canceled"
+        : existing ? "Subscription updated" : "Subscription started",
+      body: plan
+        ? `${plan.name} ${plan.interval.toLowerCase()} subscription status: ${values.status.toLowerCase().replaceAll("_", " ")}.`
+        : `Your subscription status is now ${values.status.toLowerCase().replaceAll("_", " ")}.`,
+      href: "/user-dashboard/settings/manage-subscriptions",
+      entityType: "SUBSCRIPTION",
+      entityId: stored.id,
+      metadata: { planId, status: values.status },
+      dedupeKey: `billing:subscription:${subscription.id}:${planId}:${values.status}`,
+      groupKey: "billing-subscription",
+    });
+  }
 }
 
 async function syncInvoice(invoice: Stripe.Invoice, failed: boolean) {
@@ -227,13 +254,13 @@ async function syncInvoice(invoice: Stripe.Invoice, failed: boolean) {
   if (!providerSubId) return;
 
   let subscription = await db.orm.public.Subscription
-    .select("id", "updatedAt")
+    .select("id", "userId", "updatedAt")
     .first({ providerSubId });
   if (!subscription) {
     const stripeSubscription = await getStripe().subscriptions.retrieve(providerSubId);
     await syncSubscription(stripeSubscription);
     subscription = await db.orm.public.Subscription
-      .select("id", "updatedAt")
+      .select("id", "userId", "updatedAt")
       .first({ providerSubId });
   }
   if (!subscription) throw new Error("Unable to resolve the invoice subscription");
@@ -257,12 +284,30 @@ async function syncInvoice(invoice: Stripe.Invoice, failed: boolean) {
     providerInvoiceId: invoice.id,
     paidAt,
   };
-  if (existing) await db.orm.public.Invoice.where({ id: existing.id }).update(values);
-  else await db.orm.public.Invoice.create(values);
+  const storedInvoice = existing
+    ? await db.orm.public.Invoice.select("id").where({ id: existing.id }).update(values)
+    : await db.orm.public.Invoice.select("id").create(values);
 
   if (failed) {
     await db.orm.public.Subscription.where({ id: subscription.id }).update({ status: "PAST_DUE" });
   }
+
+  await createNotification({
+    userId: String(subscription.userId),
+    type: failed ? "PAYMENT_FAILED" : "PAYMENT_RECEIVED",
+    category: "BILLING",
+    priority: failed ? "CRITICAL" : "NORMAL",
+    title: failed ? "Payment failed" : "Payment received",
+    body: failed
+      ? "We could not collect your subscription payment. Review your billing details to avoid losing access."
+      : "Your subscription payment was received successfully.",
+    href: "/user-dashboard/settings/manage-subscriptions",
+    entityType: "INVOICE",
+    entityId: storedInvoice?.id ?? existing?.id,
+    metadata: { providerInvoiceId: invoice.id, amountCents: invoice.amount_due, currency: invoice.currency.toUpperCase() },
+    dedupeKey: `billing:invoice:${invoice.id}:${status}`,
+    groupKey: "billing-invoices",
+  });
 }
 
 async function processStripeEvent(event: Stripe.Event) {

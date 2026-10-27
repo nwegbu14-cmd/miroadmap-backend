@@ -50,3 +50,19 @@ test("rejects a response without an explicit safety decision", () => {
     suggestions: [],
   }), /safety status/);
 });
+
+test("replaces AI-supplied XP with platform rewards", () => {
+  const output = parseRoadmapAiOutput({
+    assistantMessage: "I found two useful adjustments.",
+    scenarioSummary: "",
+    requiresClarification: false,
+    safetyStatus: "SAFE",
+    suggestions: [
+      { operation: "ADD", stepPosition: 1, taskPosition: null, title: "Required", required: true, xp: 999, rationale: "Useful." },
+      { operation: "ADD", stepPosition: 1, taskPosition: null, title: "Optional", required: false, xp: 999, rationale: "Useful." },
+    ],
+  });
+
+  assert.equal(output.suggestions[0]?.xp, 10);
+  assert.equal(output.suggestions[1]?.xp, 5);
+});

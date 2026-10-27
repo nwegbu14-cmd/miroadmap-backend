@@ -5,6 +5,7 @@ import {
   db,
 } from "../../miroadmap-schema/src/prisma/db.ts";
 import { getAvatarPublicUrl } from "../lib/avatar-storage.ts";
+import { userAcceptsNotification } from "./notifications.ts";
 
 export type RoadmapAssetInput = {
   id: string;
@@ -805,6 +806,7 @@ export async function publishRoadmap(
         ]);
 
         for (const admin of [...admins, ...superAdmins]) {
+          if (!(await userAcceptsNotification(tx, admin.id, "VERIFICATION"))) continue;
           await tx.orm.public.Notification.create({
             userId: admin.id,
             actorId: userId,
@@ -832,6 +834,7 @@ export async function publishRoadmap(
 
     for (const follower of followers) {
       if (!follower.versionId || follower.versionId === version.id) continue;
+      if (!(await userAcceptsNotification(tx, follower.userId, "ROADMAP"))) continue;
       await tx.orm.public.Notification.create({
         userId: follower.userId,
         actorId: userId,

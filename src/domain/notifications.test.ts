@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  defaultNotificationPreferences,
+  isNotificationAllowed,
   notificationBelongsToUser,
   parseNotificationListOptions,
   parseNotificationPreferencePatch,
@@ -28,4 +30,13 @@ test("notification preference patches accept only known boolean values", () => {
 test("notification ownership never permits another account", () => {
   assert.equal(notificationBelongsToUser("user-a", "user-a"), true);
   assert.equal(notificationBelongsToUser("user-a", "user-b"), false);
+});
+
+test("category preferences suppress normal notifications but never critical or uncategorised ones", () => {
+  const off = { ...defaultNotificationPreferences, roadmapActivity: false, billing: false };
+  assert.equal(isNotificationAllowed(off, "ROADMAP", "NORMAL"), false);
+  assert.equal(isNotificationAllowed(off, "BILLING", "HIGH"), false);
+  assert.equal(isNotificationAllowed(off, "BILLING", "CRITICAL"), true);
+  assert.equal(isNotificationAllowed(off, "VERIFICATION", "NORMAL"), true);
+  assert.equal(isNotificationAllowed(off, "ACCOUNT", "NORMAL"), true);
 });

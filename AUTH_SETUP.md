@@ -8,7 +8,8 @@ Use Node.js 26; the repository pins 26.10.0 for the API and Prisma schema runtim
 
 ## Environment
 
-1. Copy `.env.example` to `.env` in this directory.
+1. Copy `.env.local.example` to `.env` in this directory (`.env.example` is the
+   production template).
 2. Set `DATABASE_URL` to the Postgres URL used by `miroadmap-schema`.
 3. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from the Supabase project.
 4. Add the initial owner's email to `SUPER_ADMIN_EMAILS`.

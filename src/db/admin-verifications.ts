@@ -3,6 +3,7 @@ import {
   db,
 } from "../../miroadmap-schema/src/prisma/db.ts";
 import { createVerificationEvidenceSignedUrl } from "../lib/verification-evidence-storage.ts";
+import { userAcceptsNotification } from "./notifications.ts";
 
 type VerificationStatus = "PENDING" | "IN_REVIEW" | "APPROVED" | "DECLINED";
 
@@ -149,7 +150,7 @@ export async function updateAdminVerificationRequest(input: {
     }
     const dedupeKey = `verification-status:${request.id}:${input.status}`;
     const existingNotification = await tx.orm.public.Notification.select("id").first({ dedupeKey });
-    if (!existingNotification) {
+    if (!existingNotification && await userAcceptsNotification(tx, request.requesterId, "VERIFICATION")) {
       await tx.orm.public.Notification.create({
         userId: request.requesterId,
         actorId: input.reviewerId,

@@ -10,7 +10,7 @@ import {
   ROADMAP_TAILOR_USER_TEMPLATE,
   type RoadmapAiChange,
 } from "../domain/roadmap-ai.ts";
-import { calculateRoadmapProgress } from "../domain/roadmap-progress.ts";
+import { calculateRoadmapProgress, platformTaskXp } from "../domain/roadmap-progress.ts";
 import {
   AiProviderError,
   createRoadmapAiResponse,
@@ -65,7 +65,7 @@ function asTask(value: string | RoadmapTaskInput, fallbackId: string): RoadmapTa
     assets: value.assets ?? [],
     source: value.source === "ai" ? "ai" : "curated",
     required: value.required !== false,
-    xp: value.xp ?? (value.required === false ? 5 : 10),
+    xp: platformTaskXp(value.required !== false),
   };
 }
 
@@ -159,19 +159,23 @@ export async function getPersonalizedTaskSlots(
     for (const task of tasks.filter((item) => item.stepId === step.id)) {
       if (hidden.has(task.id)) continue;
       const update = updates.get(task.id) ?? {};
+      const required = typeof update.required === "boolean" ? update.required : task.required;
       stepTasks.push({
         stepId: step.id,
         stepPosition: step.position,
         taskId: task.id,
         deltaId: null,
         title: typeof update.title === "string" ? update.title : task.title,
-        required: typeof update.required === "boolean" ? update.required : task.required,
-        xp: Number.isInteger(update.xp) ? Number(update.xp) : task.xp,
+        required,
+        xp: platformTaskXp(required),
       });
     }
     for (const addition of additions.get(step.id) ?? []) {
       if (hidden.has(addition.id)) continue;
       const update = updates.get(addition.id) ?? {};
+      const required = typeof update.required === "boolean"
+        ? update.required
+        : addition.payload.required !== false;
       stepTasks.push({
         stepId: step.id,
         stepPosition: step.position,
@@ -180,12 +184,8 @@ export async function getPersonalizedTaskSlots(
         title: typeof update.title === "string"
           ? update.title
           : String(addition.payload.title ?? "Personalized task"),
-        required: typeof update.required === "boolean"
-          ? update.required
-          : addition.payload.required !== false,
-        xp: Number.isInteger(update.xp)
-          ? Number(update.xp)
-          : Number.isInteger(addition.payload.xp) ? Number(addition.payload.xp) : 10,
+        required,
+        xp: platformTaskXp(required),
       });
     }
     stepTasks.forEach((slot, index) => slots.push({ ...slot, displayTaskPosition: index + 1 }));
@@ -232,17 +232,21 @@ export async function getPersonalizedRoadmapAtVersion(
       if (hidden.has(task.id)) continue;
       const current = asTask(step.checklist[task.position - 1]!, `base-${task.id}`);
       const update = updates.get(task.id);
+      const required = update && typeof update.required === "boolean" ? update.required : current.required !== false;
       checklist.push(update ? {
         ...current,
         title: typeof update.title === "string" ? update.title : current.title,
-        required: typeof update.required === "boolean" ? update.required : current.required,
-        xp: Number.isInteger(update.xp) ? Number(update.xp) : current.xp,
+        required,
+        xp: platformTaskXp(required),
         source: "ai",
       } : current);
     }
     for (const addition of additions.get(dbStep.id) ?? []) {
       if (hidden.has(addition.id)) continue;
       const update = updates.get(addition.id) ?? {};
+      const required = typeof update.required === "boolean"
+        ? update.required
+        : addition.payload.required !== false;
       checklist.push({
         id: String(addition.payload.id ?? `ai-${addition.id}`),
         title: typeof update.title === "string"
@@ -251,12 +255,8 @@ export async function getPersonalizedRoadmapAtVersion(
         links: [],
         assets: [],
         source: "ai",
-        required: typeof update.required === "boolean"
-          ? update.required
-          : addition.payload.required !== false,
-        xp: Number.isInteger(update.xp)
-          ? Number(update.xp)
-          : Number.isInteger(addition.payload.xp) ? Number(addition.payload.xp) : 10,
+        required,
+        xp: platformTaskXp(required),
       });
     }
     return { ...step, checklist };
@@ -755,7 +755,7 @@ export async function decideRoadmapAiSuggestion(input: {
           id: `ai-${foundSuggestion.id}`,
           title: payload.title,
           required: payload.required,
-          xp: payload.xp,
+          xp: platformTaskXp(payload.required),
           links: [],
           assets: [],
           source: "ai",

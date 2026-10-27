@@ -19,8 +19,44 @@ export const authenticate: RequestHandler = async (request, response, next) => {
       return;
     }
 
-    const { data, error } = await getSupabaseAdmin().auth.getUser(token);
-    if (error || !data.user) {
+    const supabase = getSupabaseAdmin();
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error) {
+      const banned = error.code === "user_banned" || error.message.toLowerCase().includes("banned");
+      if (banned) {
+        // A ban prevents new sessions and refreshes. Keep a still-valid signed
+        // access token usable only long enough for the restricted account UI;
+        // requireRoles will reject every product API because the DB status is SUSPENDED.
+        const verified = await supabase.auth.getClaims(token);
+        const subject = verified.data?.claims.sub;
+        const appUser = subject ? await findUserById(subject) : null;
+        if (subject && appUser?.status === "SUSPENDED") {
+          const claims = verified.data!.claims;
+          request.authUser = {
+            id: subject,
+            aud: typeof claims.aud === "string" ? claims.aud : "authenticated",
+            role: typeof claims.role === "string" ? claims.role : "authenticated",
+            email: typeof claims.email === "string" ? claims.email : appUser.email,
+            app_metadata: claims.app_metadata && typeof claims.app_metadata === "object" ? claims.app_metadata : {},
+            user_metadata: claims.user_metadata && typeof claims.user_metadata === "object" ? claims.user_metadata : {},
+            identities: [],
+            created_at: "",
+          };
+          next();
+          return;
+        }
+      }
+      // Only a rejected token is a 401; Supabase outages/throttling must not sign users out.
+      const rejected = typeof error.status === "number"
+        && error.status >= 400 && error.status < 500 && error.status !== 429;
+      if (rejected) {
+        response.status(401).json({ error: "Invalid or expired session" });
+      } else {
+        response.status(503).json({ error: "Authentication service is temporarily unavailable" });
+      }
+      return;
+    }
+    if (!data.user) {
       response.status(401).json({ error: "Invalid or expired session" });
       return;
     }

@@ -6,6 +6,9 @@ import {
   findUserByEmail,
   getAdminUserDetails,
   listUsers,
+  reactivateUser,
+  suspendUser,
+  UserAdministrationError,
 } from "../db/users.ts";
 import { getSupabaseAdmin } from "../lib/supabase.ts";
 import { authenticate, requireRoles } from "../middleware/auth.ts";
@@ -32,6 +35,87 @@ adminUsersRouter.get(
     const parsedLimit = Number(request.query.limit ?? 100);
     const users = await listUsers(Number.isFinite(parsedLimit) ? parsedLimit : 100);
     response.json({ users });
+  },
+);
+
+adminUsersRouter.post(
+  "/:userId/suspend",
+  authenticate,
+  requireRoles("ADMIN", "SUPER_ADMIN"),
+  async (request, response) => {
+    const userId = String(request.params.userId ?? "");
+    const reason = text(request.body?.reason);
+    if (reason.length < 3 || reason.length > 500) {
+      response.status(400).json({ error: "A suspension reason between 3 and 500 characters is required" });
+      return;
+    }
+
+    try {
+      const user = await suspendUser({
+        userId,
+        actorId: request.appUser!.id,
+        actorRole: request.appUser!.role,
+        reason,
+        ip: requestIp(request.header("x-forwarded-for"), request.ip),
+        userAgent: request.header("user-agent"),
+      });
+      const { error } = await getSupabaseAdmin().auth.admin.updateUserById(userId, {
+        ban_duration: "876000h",
+      });
+      if (error) {
+        response.status(502).json({
+          error: "The account was suspended, but session revocation could not be confirmed",
+          user,
+        });
+        return;
+      }
+      response.json({ user });
+    } catch (error) {
+      if (error instanceof UserAdministrationError) {
+        response.status(error.status).json({ error: error.message });
+        return;
+      }
+      throw error;
+    }
+  },
+);
+
+adminUsersRouter.post(
+  "/:userId/reactivate",
+  authenticate,
+  requireRoles("ADMIN", "SUPER_ADMIN"),
+  async (request, response) => {
+    const userId = String(request.params.userId ?? "");
+    const reason = text(request.body?.reason) || "Account restored by an administrator";
+    if (reason.length > 500) {
+      response.status(400).json({ error: "The restoration reason is too long" });
+      return;
+    }
+
+    try {
+      const { error } = await getSupabaseAdmin().auth.admin.updateUserById(userId, {
+        ban_duration: "none",
+      });
+      if (error) {
+        response.status(502).json({ error: "The authentication account could not be reactivated" });
+        return;
+      }
+      const user = await reactivateUser({
+        userId,
+        actorId: request.appUser!.id,
+        actorRole: request.appUser!.role,
+        reason,
+        ip: requestIp(request.header("x-forwarded-for"), request.ip),
+        userAgent: request.header("user-agent"),
+      });
+      response.json({ user });
+    } catch (error) {
+      if (error instanceof UserAdministrationError) {
+        response.status(error.status).json({ error: error.message });
+        return;
+      }
+      throw error;
+    }
   },
 );
 

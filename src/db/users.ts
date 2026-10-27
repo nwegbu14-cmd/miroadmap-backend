@@ -7,6 +7,12 @@ import type { AppAccountType, AppRole, AppUserIdentity } from "../types/express.
 
 export type UserStatus = "ACTIVE" | "SUSPENDED" | "DELETED";
 
+export class UserAdministrationError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 type SyncUserInput = {
   id: string;
   email: string;
@@ -220,29 +226,38 @@ export async function completeOnboarding(userId: string, answers: OnboardingAnsw
 
 export async function syncAuthenticatedUser(input: SyncUserInput): Promise<AppUserIdentity> {
   await connectDatabase();
-  const existing = await findUserById(input.id);
+  let existing = await findUserById(input.id);
   const desiredRole: AppRole = input.makeSuperAdmin ? "SUPER_ADMIN" : "USER";
 
   if (!existing) {
-    return db.transaction(async (tx) => {
-      const created = await tx.orm.public.User
-        .select("id", "email", "fullName", "avatarPath", "role", "status", "accountType")
-        .create({
-          id: input.id,
-          email: input.email,
-          fullName: input.fullName,
-          role: desiredRole,
-          accountType: input.makeSuperAdmin ? "INTERNAL" : "STANDARD",
+    try {
+      return await db.transaction(async (tx) => {
+        const created = await tx.orm.public.User
+          .select("id", "email", "fullName", "avatarPath", "role", "status", "accountType")
+          .create({
+            id: input.id,
+            email: input.email,
+            fullName: input.fullName,
+            role: desiredRole,
+            accountType: input.makeSuperAdmin ? "INTERNAL" : "STANDARD",
+          });
+
+        await tx.orm.public.UserActivity.create({
+          userId: input.id,
+          action: "ACCOUNT_CREATED",
+          metadata: { source: input.makeSuperAdmin ? "SUPER_ADMIN_BOOTSTRAP" : "SELF_SIGNUP" },
         });
 
-      await tx.orm.public.UserActivity.create({
-        userId: input.id,
-        action: "ACCOUNT_CREATED",
-        metadata: { source: input.makeSuperAdmin ? "SUPER_ADMIN_BOOTSTRAP" : "SELF_SIGNUP" },
+        return toIdentity(created);
       });
-
-      return toIdentity(created);
-    });
+    } catch (error) {
+      // Concurrent first-profile requests can all observe the account as absent.
+      // The winning insert is authoritative; losing unique-key inserts continue
+      // through the normal update path instead of surfacing a 500.
+      if ((error as { sqlState?: string }).sqlState !== "23505") throw error;
+      existing = await findUserById(input.id);
+      if (!existing) throw error;
+    }
   }
 
   const role = input.makeSuperAdmin ? "SUPER_ADMIN" : existing.role;
@@ -277,6 +292,8 @@ export async function getAdminUserDetails(id: string) {
       "role",
       "status",
       "accountType",
+      "suspendedAt",
+      "suspendedReason",
       "lastActiveAt",
       "createdAt",
     )
@@ -320,6 +337,148 @@ export async function getAdminUserDetails(id: string) {
     activities,
     subscription: subscription ? { ...subscription, plan, invoices } : null,
   };
+}
+
+export async function suspendUser(input: {
+  userId: string;
+  actorId: string;
+  actorRole: AppRole;
+  reason: string;
+  ip?: string;
+  userAgent?: string;
+}) {
+  await connectDatabase();
+  const target = await db.orm.public.User
+    .select("id", "fullName", "email", "role", "status", "createdAt", "suspendedAt", "suspendedReason")
+    .first({ id: input.userId });
+  if (!target) throw new UserAdministrationError("User not found", 404);
+  if (String(target.id) === input.actorId) {
+    throw new UserAdministrationError("You cannot suspend your own account", 409);
+  }
+  if (target.role === "SUPER_ADMIN" || (target.role === "ADMIN" && input.actorRole !== "SUPER_ADMIN")) {
+    throw new UserAdministrationError("You cannot suspend this account", 403);
+  }
+  if (target.status === "DELETED") throw new UserAdministrationError("Deleted accounts cannot be suspended", 409);
+  if (target.status === "SUSPENDED") return getAdminUserDetails(input.userId);
+
+  const targetCreatedAt = target.createdAt;
+  const instantFactory = targetCreatedAt.constructor as { from(value: string): typeof targetCreatedAt };
+  const suspendedAt = instantFactory.from(new Date().toISOString());
+  await db.transaction(async (tx) => {
+    await tx.orm.public.User.where({ id: input.userId }).update({
+      status: "SUSPENDED",
+      suspendedAt,
+      suspendedReason: input.reason,
+    });
+    const activity = await tx.orm.public.UserActivity.select("id").create({
+      userId: input.userId,
+      action: "ACCOUNT_SUSPENDED",
+      metadata: { reason: input.reason, actorId: input.actorId },
+    });
+    await tx.orm.public.AdminAuditLog.create({
+      actorId: input.actorId,
+      action: "USER_SUSPENDED",
+      targetType: "User",
+      targetId: input.userId,
+      before: { status: target.status, suspendedAt: target.suspendedAt, suspendedReason: target.suspendedReason },
+      after: { status: "SUSPENDED", suspendedAt: String(suspendedAt), suspendedReason: input.reason },
+      ip: input.ip,
+      userAgent: input.userAgent,
+    });
+    const dedupeKey = `enforcement:${activity.id}:ACCOUNT_SUSPENDED:${input.userId}`;
+    const notification = await tx.orm.public.Notification.select("id").upsert({
+      create: {
+        userId: input.userId,
+        actorId: input.actorId,
+        type: "ACCOUNT_SUSPENDED",
+        category: "ACCOUNT",
+        priority: "CRITICAL",
+        title: "Account suspended",
+        body: input.reason,
+        href: "/account-suspended",
+        entityType: "USER",
+        entityId: input.userId,
+        metadata: { suspendedAt: String(suspendedAt) },
+        dedupeKey,
+        groupKey: `account-enforcement:${input.userId}`,
+      },
+      update: { dedupeKey },
+      conflictOn: { dedupeKey },
+    });
+    await tx.orm.public.NotificationDelivery.upsert({
+      create: { notificationId: notification.id, channel: "EMAIL" },
+      update: { status: "PENDING", failureReason: null },
+      conflictOn: { notificationId: notification.id, channel: "EMAIL" },
+    });
+  });
+  return getAdminUserDetails(input.userId);
+}
+
+export async function reactivateUser(input: {
+  userId: string;
+  actorId: string;
+  actorRole: AppRole;
+  reason: string;
+  ip?: string;
+  userAgent?: string;
+}) {
+  await connectDatabase();
+  const target = await db.orm.public.User
+    .select("id", "role", "status", "createdAt", "suspendedAt", "suspendedReason")
+    .first({ id: input.userId });
+  if (!target) throw new UserAdministrationError("User not found", 404);
+  if (target.role === "SUPER_ADMIN" || (target.role === "ADMIN" && input.actorRole !== "SUPER_ADMIN")) {
+    throw new UserAdministrationError("You cannot reactivate this account", 403);
+  }
+  if (target.status !== "SUSPENDED") return getAdminUserDetails(input.userId);
+
+  await db.transaction(async (tx) => {
+    await tx.orm.public.User.where({ id: input.userId }).update({
+      status: "ACTIVE",
+      suspendedAt: null,
+      suspendedReason: null,
+    });
+    const activity = await tx.orm.public.UserActivity.select("id").create({
+      userId: input.userId,
+      action: "ACCOUNT_RESTORED",
+      metadata: { reason: input.reason, actorId: input.actorId },
+    });
+    await tx.orm.public.AdminAuditLog.create({
+      actorId: input.actorId,
+      action: "USER_REACTIVATED",
+      targetType: "User",
+      targetId: input.userId,
+      before: { status: target.status, suspendedAt: target.suspendedAt, suspendedReason: target.suspendedReason },
+      after: { status: "ACTIVE", restorationReason: input.reason },
+      ip: input.ip,
+      userAgent: input.userAgent,
+    });
+    const dedupeKey = `enforcement:${activity.id}:ACCOUNT_RESTORED:${input.userId}`;
+    const notification = await tx.orm.public.Notification.select("id").upsert({
+      create: {
+        userId: input.userId,
+        actorId: input.actorId,
+        type: "ACCOUNT_RESTORED",
+        category: "ACCOUNT",
+        priority: "CRITICAL",
+        title: "Account restored",
+        body: input.reason,
+        href: "/user-dashboard",
+        entityType: "USER",
+        entityId: input.userId,
+        dedupeKey,
+        groupKey: `account-enforcement:${input.userId}`,
+      },
+      update: { dedupeKey },
+      conflictOn: { dedupeKey },
+    });
+    await tx.orm.public.NotificationDelivery.upsert({
+      create: { notificationId: notification.id, channel: "EMAIL" },
+      update: { status: "PENDING", failureReason: null },
+      conflictOn: { notificationId: notification.id, channel: "EMAIL" },
+    });
+  });
+  return getAdminUserDetails(input.userId);
 }
 
 export async function createInvitedUser(input: InviteUserInput): Promise<AppUserIdentity> {

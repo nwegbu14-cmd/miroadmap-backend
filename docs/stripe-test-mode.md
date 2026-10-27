@@ -9,7 +9,7 @@ in product testing.
 
 1. In a Stripe test-mode account, create recurring monthly and yearly Prices for
    Premium and Ultimate.
-2. Copy `.env.example` values into the backend `.env` and set:
+2. Copy `.env.local.example` values into the backend `.env` and set:
    - `STRIPE_SECRET_KEY`
    - `STRIPE_WEBHOOK_SECRET`
    - the four `STRIPE_PRICE_*` values

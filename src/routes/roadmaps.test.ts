@@ -109,3 +109,23 @@ test("verification evidence rejects oversized images and unsupported file types"
   });
   assert.deepEqual(input.verificationEvidence, []);
 });
+
+test("author-supplied xp is replaced by the platform reward for required and optional tasks", () => {
+  const input = parseRoadmapInput({
+    title: "XP clamp roadmap",
+    shortDescription: "Rewards are platform-defined.",
+    time: "1 week",
+    category: "Education",
+    steps: Array.from({ length: 3 }, (_, index) => ({
+      title: `Step ${index + 1}`,
+      checklist: [
+        { title: "Required task", xp: 1000 },
+        { title: "Optional task", required: false, xp: 900 },
+      ],
+    })),
+  });
+  if (typeof input === "string") throw new Error(input);
+  const [required, optional] = input.steps[0]!.checklist as RoadmapTaskInput[];
+  assert.equal(required!.xp, 10);
+  assert.equal(optional!.xp, 5);
+});

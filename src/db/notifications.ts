@@ -5,6 +5,8 @@ import {
 
 import {
   defaultNotificationPreferences,
+  isNotificationAllowed,
+  notificationPreferenceKeys,
   type NotificationListOptions,
   type NotificationPreferences,
 } from "../domain/notifications.ts";
@@ -73,6 +75,9 @@ function serializeNotification(notification: {
 
 export async function createNotification(input: CreateNotificationInput) {
   await connectDatabase();
+  const category = input.category ?? "SYSTEM";
+  const priority = input.priority ?? "NORMAL";
+  if (!await userAcceptsNotification(db, input.userId, category, priority)) return null;
   const selected = db.orm.public.Notification
     .select(
       "id",
@@ -94,8 +99,8 @@ export async function createNotification(input: CreateNotificationInput) {
     userId: input.userId,
     actorId: input.actorId,
     type: input.type,
-    category: input.category ?? "SYSTEM" as const,
-    priority: input.priority ?? "NORMAL" as const,
+    category,
+    priority,
     title: input.title,
     body: input.body,
     href: input.href,
@@ -199,10 +204,23 @@ export async function markAllNotificationsRead(userId: string): Promise<number> 
     .first();
   if (!firstUnread) return 0;
 
-  const unreadCount = await getUnreadNotificationCount(userId);
   const readAt = nowFrom(firstUnread.createdAt);
-  await db.orm.public.Notification.where({ userId, readAt: null }).update({ readAt, seenAt: readAt });
-  return unreadCount;
+  return db.orm.public.Notification
+    .where({ userId, readAt: null })
+    .updateAndCount({ readAt, seenAt: readAt });
+}
+
+// Accepts a transaction or the root client so callers can check inside their own transaction.
+export async function userAcceptsNotification(
+  store: { orm: typeof db.orm },
+  userId: string,
+  category: string,
+  priority = "NORMAL",
+): Promise<boolean> {
+  const stored = await store.orm.public.NotificationPreference
+    .select(...notificationPreferenceKeys)
+    .first({ userId });
+  return isNotificationAllowed(stored ?? defaultNotificationPreferences, category, priority);
 }
 
 export async function getNotificationPreferences(userId: string): Promise<NotificationPreferences> {

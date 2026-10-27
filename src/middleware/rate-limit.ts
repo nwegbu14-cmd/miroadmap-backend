@@ -11,6 +11,12 @@ export function createRateLimit(options: {
   let requestsUntilCleanup = 100;
 
   return (request, response, next) => {
+    // Local E2E runs only; never honored in production.
+    if (process.env.DISABLE_RATE_LIMITS === "1" && process.env.NODE_ENV !== "production") {
+      next();
+      return;
+    }
+
     const now = Date.now();
     const key = request.ip || request.socket.remoteAddress || "unknown";
     const existing = buckets.get(key);

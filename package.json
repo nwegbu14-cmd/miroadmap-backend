@@ -17,6 +17,7 @@
     "seed:stories": "tsx src/scripts/seed-stories.ts",
     "backfill:story-roadmaps": "tsx src/scripts/backfill-story-roadmaps.ts",
     "test": "node --import tsx --test src/**/*.test.ts",
+    "test:e2e": "tsx src/scripts/e2e-platform.ts",
     "typecheck": "tsc --noEmit"
   },
   "author": "davvvead",
@@ -29,12 +30,14 @@
     "@supabase/supabase-js": "^2.109.0",
     "dotenv": "^17.2.2",
     "express": "^5.2.1",
+    "nodemailer": "^7.0.13",
     "stripe": "^22.6.2",
     "tsx": "^4.23.13"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.2",
+    "@types/nodemailer": "^8.0.2",
     "typescript": "^7.0.2"
   }
 }

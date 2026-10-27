@@ -3,10 +3,12 @@ import "dotenv/config";
 import express, { type ErrorRequestHandler, type RequestHandler } from "express";
 
 import { getConfig } from "./src/config.ts";
+import { adminAnalyticsRouter } from "./src/routes/admin-analytics.ts";
 import { adminRoadmapsRouter } from "./src/routes/admin-roadmaps.ts";
 import { adminStoriesRouter } from "./src/routes/admin-stories.ts";
 import { adminFeedbackRouter } from "./src/routes/admin-feedback.ts";
 import { adminUsersRouter } from "./src/routes/admin-users.ts";
+import { adminSupportRouter } from "./src/routes/admin-support.ts";
 import { adminVerificationsRouter } from "./src/routes/admin-verifications.ts";
 import { authRouter } from "./src/routes/auth.ts";
 import { billingRouter, stripeWebhookHandler } from "./src/routes/billing.ts";
@@ -17,11 +19,15 @@ import {
 import { roadmapsRouter } from "./src/routes/roadmaps.ts";
 import { storiesRouter } from "./src/routes/stories.ts";
 import { feedbackRouter } from "./src/routes/feedback.ts";
+import { adminNewsletterRouter, newsletterRouter } from "./src/routes/newsletter.ts";
+import { adminPartnershipsRouter, partnershipsRouter } from "./src/routes/partnerships.ts";
+import { supportRouter } from "./src/routes/support.ts";
 import {
   apiSecurityHeaders,
   rejectUnsafePayloadShape,
 } from "./src/middleware/request-security.ts";
 import { logRequests } from "./src/middleware/request-logging.ts";
+import { productionEnvWarnings } from "./src/lib/env-check.ts";
 import { errorLogFields, runtimeLog } from "./src/lib/runtime-log.ts";
 
 const config = getConfig();
@@ -86,10 +92,17 @@ app.get("/health", (_request, response) => {
 app.use("/api/auth", authRouter);
 app.use("/api/billing", billingRouter);
 app.use("/api/feedback", feedbackRouter);
+app.use("/api/newsletter", newsletterRouter);
+app.use("/api/partnerships", partnershipsRouter);
+app.use("/api/support", supportRouter);
+app.use("/api/admin/analytics", adminAnalyticsRouter);
 app.use("/api/admin/feedback", adminFeedbackRouter);
+app.use("/api/admin/newsletter", adminNewsletterRouter);
+app.use("/api/admin/partnerships", adminPartnershipsRouter);
 app.use("/api/admin/roadmaps", adminRoadmapsRouter);
 app.use("/api/admin/stories", adminStoriesRouter);
 app.use("/api/admin/users", adminUsersRouter);
+app.use("/api/admin/support", adminSupportRouter);
 app.use("/api/admin/verifications", adminVerificationsRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/notification-preferences", notificationPreferencesRouter);
@@ -101,7 +114,11 @@ app.use((_request, response) => {
 });
 
 const errorHandler: ErrorRequestHandler = (error, request, response, next) => {
-  runtimeLog("error", "request_error", {
+  // Body-parser failures carry a 4xx status; report those to the client instead of a 500.
+  const clientStatus = Number.isInteger(error?.status) && error.status >= 400 && error.status < 500
+    ? error.status as number
+    : null;
+  runtimeLog(clientStatus ? "warn" : "error", "request_error", {
     requestId: response.locals.requestId,
     method: request.method,
     path: request.path,
@@ -109,6 +126,14 @@ const errorHandler: ErrorRequestHandler = (error, request, response, next) => {
   });
   if (response.headersSent) {
     next(error);
+    return;
+  }
+  if (clientStatus) {
+    response.status(clientStatus).json({
+      error: clientStatus === 413
+        ? "Request body is too large"
+        : error.type === "entity.parse.failed" ? "Request body is not valid JSON" : "Invalid request",
+    });
     return;
   }
   response.status(500).json({ error: "Internal server error" });
@@ -120,6 +145,9 @@ app.listen(config.port, () => {
     port: config.port,
     environment: process.env.NODE_ENV ?? "development",
   });
+  for (const warning of productionEnvWarnings(process.env)) {
+    runtimeLog("warn", "production_env_warning", { warning });
+  }
 });
 
 process.on("unhandledRejection", (reason) => {

@@ -33,4 +33,25 @@ test("explicitly optional tasks do not block a roadmap with required tasks", () 
 
   assert.equal(progress.percentComplete, 100);
   assert.equal(progress.isComplete, true);
+  assert.equal(progress.xpEarned, 80);
+});
+
+test("awards and reverses platform task, step, and roadmap bonuses", () => {
+  const progressTasks: ProgressTask[] = [
+    { taskId: "one", deltaId: null, stepId: "step-one", required: true, xp: 1_000 },
+    { taskId: "two", deltaId: null, stepId: "step-one", required: true, xp: 1_000 },
+    { taskId: "three", deltaId: null, stepId: "step-two", required: true, xp: 1_000 },
+  ];
+
+  const firstStep = calculateRoadmapProgress(progressTasks, new Set(["one", "two"]));
+  assert.equal(firstStep.xpEarned, 40);
+  assert.deepEqual(firstStep.completedStepIds, ["step-one"]);
+
+  const complete = calculateRoadmapProgress(progressTasks, new Set(["one", "two", "three"]));
+  assert.equal(complete.xpEarned, 120);
+  assert.equal(complete.isComplete, true);
+
+  const reopened = calculateRoadmapProgress(progressTasks, new Set(["one", "three"]));
+  assert.equal(reopened.xpEarned, 40);
+  assert.equal(reopened.isComplete, false);
 });
