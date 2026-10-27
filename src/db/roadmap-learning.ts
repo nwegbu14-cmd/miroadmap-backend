@@ -3,6 +3,7 @@ import {
   db,
 } from "../../miroadmap-schema/src/prisma/db.ts";
 import { calculateRoadmapProgress } from "../domain/roadmap-progress.ts";
+import { activeFollowLimit } from "../domain/entitlements.ts";
 import { getAvatarPublicUrl } from "../lib/avatar-storage.ts";
 import type { RoadmapRecord } from "./roadmaps.ts";
 import {
@@ -15,9 +16,38 @@ export class RoadmapLearningError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code?: string,
   ) {
     super(message);
   }
+}
+
+async function userActiveFollowLimit(userId: string): Promise<number | null> {
+  const user = await db.orm.public.User
+    .select("role", "accountType")
+    .first({ id: userId });
+  if (!user) throw new RoadmapLearningError("User account not found", 404);
+
+  const privileged = user.role !== "USER"
+    || user.accountType === "INTERNAL"
+    || user.accountType === "DEMO";
+  if (privileged) return null;
+
+  const subscription = await db.orm.public.Subscription
+    .select("planId", "status")
+    .first({ userId });
+  const entitlement = subscription
+    ? await db.orm.public.PlanEntitlement
+        .select("limitBool", "limitInt")
+        .first({ planId: subscription.planId, key: "MAX_ACTIVE_FOLLOWS" })
+    : null;
+
+  return activeFollowLimit({
+    privileged,
+    subscriptionStatus: subscription?.status,
+    entitlementEnabled: entitlement?.limitBool,
+    entitlementLimit: entitlement?.limitInt,
+  });
 }
 
 export type RoadmapProgressRecord = {
@@ -249,6 +279,21 @@ export async function followRoadmap(userId: string, identifier: string) {
   const existingProgress = await db.orm.public.RoadmapProgress
     .select("versionId")
     .first({ userId, roadmapId: roadmap.id });
+  if (!existingFollow) {
+    const limit = await userActiveFollowLimit(userId);
+    if (limit !== null) {
+      const activeFollows = await db.orm.public.RoadmapFollow
+        .where({ userId })
+        .aggregate((follow) => ({ count: follow.count() }));
+      if (activeFollows.count >= limit) {
+        throw new RoadmapLearningError(
+          "Your Free plan includes 1 active roadmap. Unfollow your current roadmap or upgrade for unlimited follows.",
+          402,
+          "FOLLOW_LIMIT_REACHED",
+        );
+      }
+    }
+  }
   if (!existingFollow || !existingProgress) {
     const versionId = existingProgress?.versionId
       ?? existingFollow?.versionId

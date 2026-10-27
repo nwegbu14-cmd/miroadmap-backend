@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { officialLinkData, type CreateRoadmapInput, type RoadmapTaskInput } from "../db/roadmaps.ts";
+import {
+  officialLinkData,
+  roadmapCanRequestVerification,
+  roadmapIsVerified,
+  type CreateRoadmapInput,
+  type RoadmapTaskInput,
+} from "../db/roadmaps.ts";
 import { parseRoadmapInput } from "./roadmaps.ts";
 
 function parseTaskLinks(links: unknown[], extra: Record<string, unknown> = {}): CreateRoadmapInput {
@@ -108,6 +114,14 @@ test("verification evidence rejects oversized images and unsupported file types"
     ],
   });
   assert.deepEqual(input.verificationEvidence, []);
+});
+
+test("official roadmaps bypass the community verification workflow", () => {
+  assert.equal(roadmapCanRequestVerification("OFFICIAL", true), false);
+  assert.equal(roadmapCanRequestVerification("COMMUNITY", true), true);
+  assert.equal(roadmapCanRequestVerification("COMMUNITY", false), false);
+  assert.equal(roadmapIsVerified("OFFICIAL", false), true);
+  assert.equal(roadmapIsVerified("COMMUNITY", false), false);
 });
 
 test("author-supplied xp is replaced by the platform reward for required and optional tasks", () => {

@@ -57,9 +57,15 @@ export async function getAdminRoadmapOverview() {
   ]);
 
   const openVerificationByRoadmap = new Map<string, VerificationStatus>();
+  const communityRoadmapIds = new Set(
+    roadmaps
+      .filter((roadmap) => roadmap.origin === "COMMUNITY")
+      .map((roadmap) => String(roadmap.id)),
+  );
   for (const request of verificationRequests) {
     if (request.status !== "PENDING" && request.status !== "IN_REVIEW") continue;
     const roadmapId = String(request.roadmapId);
+    if (!communityRoadmapIds.has(roadmapId)) continue;
     const existing = openVerificationByRoadmap.get(roadmapId);
     if (!existing || request.status === "PENDING") {
       openVerificationByRoadmap.set(roadmapId, request.status);
@@ -97,7 +103,9 @@ export async function getAdminRoadmapOverview() {
         role: author.role,
       } : null,
       stepCount: Array.isArray(snapshot?.steps) ? snapshot.steps.length : 0,
-      verificationStatus: openVerificationByRoadmap.get(String(roadmap.id)) ?? null,
+      verificationStatus: roadmap.origin === "COMMUNITY"
+        ? openVerificationByRoadmap.get(String(roadmap.id)) ?? null
+        : null,
       createdAt: toIso(roadmap.createdAt),
       updatedAt: toIso(roadmap.updatedAt),
       publishedAt: toIso(roadmap.publishedAt),

@@ -11,6 +11,7 @@ import {
   type RoadmapAiChange,
 } from "../domain/roadmap-ai.ts";
 import { calculateRoadmapProgress, platformTaskXp } from "../domain/roadmap-progress.ts";
+import { subscriptionGrantsPlanAccess } from "../domain/entitlements.ts";
 import {
   AiProviderError,
   createRoadmapAiResponse,
@@ -303,7 +304,7 @@ async function aiAccess(user: AppUser) {
       .first({ userId: user.id }),
     monthlyRoadmapTailorUsage(user.id),
   ]);
-  if (!subscription || subscription.status === "CANCELED" || subscription.status === "PAST_DUE") {
+  if (!subscription || !subscriptionGrantsPlanAccess(subscription.status)) {
     return limitedAiAccess("Free", FREE_MONTHLY_AI_ADJUSTMENTS, monthlyUsed);
   }
   const plan = await db.orm.public.Plan.select("name").first({ id: subscription.planId });

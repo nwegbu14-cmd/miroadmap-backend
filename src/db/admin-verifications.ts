@@ -35,9 +35,9 @@ async function requestDetails(request: {
   reviewedAt: unknown;
 }, includeEvidence: boolean) {
   const roadmap = await db.orm.public.Roadmap
-    .select("id", "title", "authorId", "currentVersionId", "publishedVersionId", "viewCount", "publishedAt")
+    .select("id", "title", "authorId", "origin", "currentVersionId", "publishedVersionId", "viewCount", "publishedAt")
     .first({ id: request.roadmapId });
-  if (!roadmap) return null;
+  if (!roadmap || roadmap.origin === "OFFICIAL") return null;
 
   const versionId = roadmap.publishedVersionId ?? roadmap.currentVersionId;
   const [requester, author, version, evidenceRows] = await Promise.all([
@@ -130,8 +130,9 @@ export async function updateAdminVerificationRequest(input: {
   if (!request) return null;
 
   const roadmap = await db.orm.public.Roadmap
-    .select("title")
+    .select("title", "origin")
     .first({ id: request.roadmapId });
+  if (!roadmap || roadmap.origin === "OFFICIAL") return null;
 
   const requestedAt = request.requestedAt;
   const instantFactory = requestedAt.constructor as { from(value: string): typeof requestedAt };

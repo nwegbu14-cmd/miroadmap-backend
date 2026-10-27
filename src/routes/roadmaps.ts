@@ -254,7 +254,7 @@ roadmapsRouter.get("/published/:roadmapId/followers", async (request, response) 
     response.json({ summary: await getRoadmapFollowerSummary(roadmapId) });
   } catch (error) {
     if (error instanceof RoadmapLearningError) {
-      response.status(error.status).json({ error: error.message });
+      response.status(error.status).json({ error: error.message, code: error.code });
       return;
     }
     throw error;
@@ -366,7 +366,7 @@ roadmapsRouter.post("/:roadmapId/follow", authenticate, activeRoles, async (requ
     response.status(201).json({ learning });
   } catch (error) {
     if (error instanceof RoadmapLearningError) {
-      response.status(error.status).json({ error: error.message });
+      response.status(error.status).json({ error: error.message, code: error.code });
       return;
     }
     throw error;

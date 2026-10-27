@@ -171,6 +171,20 @@ export class RoadmapMutationError extends Error {
   }
 }
 
+export function roadmapCanRequestVerification(
+  origin: "OFFICIAL" | "COMMUNITY" | undefined,
+  requested: boolean,
+): boolean {
+  return origin !== "OFFICIAL" && requested;
+}
+
+export function roadmapIsVerified(
+  origin: "OFFICIAL" | "COMMUNITY" | undefined,
+  storedVerification: boolean,
+): boolean {
+  return origin === "OFFICIAL" || storedVerification;
+}
+
 function slugify(value: string): string {
   const base = value
     .toLowerCase()
@@ -230,12 +244,12 @@ function toRoadmapRecord(
     attribution: snapshot.attribution,
     aiAssistance: snapshot.aiAssistance,
     audience: snapshot.audience,
-    requestVerification: snapshot.requestVerification === true,
-    verificationEvidence: Array.isArray(snapshot.verificationEvidence)
+    requestVerification: roadmapCanRequestVerification(row.origin, snapshot.requestVerification === true),
+    verificationEvidence: row.origin !== "OFFICIAL" && Array.isArray(snapshot.verificationEvidence)
       ? snapshot.verificationEvidence
       : [],
     origin: row.origin === "OFFICIAL" ? "official" : "community",
-    isVerified: row.isVerified === true,
+    isVerified: roadmapIsVerified(row.origin, row.isVerified === true),
     viewCount: row.viewCount ?? 0,
     stepCount: snapshot.displayStepCount ?? snapshot.steps.length,
     publishedAt: row.publishedAt ? toIso(row.publishedAt) : null,
@@ -704,10 +718,16 @@ export async function publishRoadmap(
   if (!version || !snapshot) {
     throw new RoadmapMutationError("The saved roadmap content is invalid", 409);
   }
-  const verificationEvidence = (snapshot.verificationEvidence ?? []).filter((evidence) =>
-    evidence.kind === "link" || evidence.storagePath.startsWith(`${userId}/`)
+  const requestsVerification = roadmapCanRequestVerification(
+    roadmap.origin,
+    snapshot.requestVerification === true,
   );
-  if (snapshot.requestVerification && verificationEvidence.length === 0) {
+  const verificationEvidence = requestsVerification
+    ? (snapshot.verificationEvidence ?? []).filter((evidence) =>
+        evidence.kind === "link" || evidence.storagePath.startsWith(`${userId}/`)
+      )
+    : [];
+  if (requestsVerification && verificationEvidence.length === 0) {
     throw new RoadmapMutationError(
       "Add at least one evidence image or link before requesting verification",
       400,
@@ -753,7 +773,7 @@ export async function publishRoadmap(
       // Community publication and verification are deliberately separate.
       // Every newly published community version is visible but unverified
       // until an admin approves its verification request.
-      isVerified: roadmap.origin === "OFFICIAL" ? roadmap.isVerified : false,
+      isVerified: roadmapIsVerified(roadmap.origin, false),
       // TODO(media-moderation): replace this temporary approval with the
       // Sightengine result before enabling production media uploads.
       moderationStatus: "APPROVED",
@@ -768,7 +788,7 @@ export async function publishRoadmap(
       await tx.orm.public.RoadmapTag.create({ roadmapId, tagId: tag.id });
     }
 
-    if (snapshot.requestVerification) {
+    if (requestsVerification) {
       const existingPendingRequest = await tx.orm.public.VerificationRequest
         .select("id")
         .first({ roadmapId, requesterId: userId, status: "PENDING" });
