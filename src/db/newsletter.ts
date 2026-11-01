@@ -155,6 +155,30 @@ export async function unsubscribe(id: string): Promise<"unsubscribed" | "already
   return "unsubscribed";
 }
 
+export async function getNewsletterEmail(id: string): Promise<string | null> {
+  await connectDatabase();
+  const row = await db.orm.public.NewsletterSubscription
+    .select("emailNormalized")
+    .first({ id });
+  return row?.emailNormalized ?? null;
+}
+
+export async function applyMailchimpStatus(
+  email: string,
+  status: Extract<NewsletterStatus, "UNSUBSCRIBED" | "BOUNCED" | "COMPLAINED">,
+): Promise<boolean> {
+  await connectDatabase();
+  const row = await db.orm.public.NewsletterSubscription
+    .select("id", "createdAt")
+    .first({ emailNormalized: email.trim().toLowerCase() });
+  if (!row) return false;
+  await db.orm.public.NewsletterSubscription.where({ id: row.id }).update({
+    status,
+    unsubscribedAt: status === "UNSUBSCRIBED" ? nowLike(row.createdAt) : null,
+  });
+  return true;
+}
+
 export async function listSubscribers(options: { status?: NewsletterStatus; limit: number }) {
   await connectDatabase();
   let query = db.orm.public.NewsletterSubscription.select(...columns);

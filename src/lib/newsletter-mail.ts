@@ -49,6 +49,7 @@ export function sendConfirmationEmail(subscription: { id: string; email: string 
     ],
     cta: { label: "Confirm my email", url },
     note: "This link expires in 7 days. If you did not request this, ignore this email and you will not be subscribed.",
+    kind: "transactional",
   });
   return sendEmail({
     to: subscription.email,
@@ -68,6 +69,8 @@ export function sendWelcomeEmail(subscription: { id: string; email: string }): P
     ],
     cta: { label: "Explore roadmaps", url: `${getMailConfig().siteUrl}/roadmaps` },
     note: `You can unsubscribe at any time: ${unsubscribePageUrl(subscription.id)}`,
+    kind: "marketing",
+    unsubscribeUrl: unsubscribePageUrl(subscription.id),
   });
   return sendEmail({
     to: subscription.email,
@@ -98,6 +101,7 @@ export function notifyTeamOfSubscriber(input: {
       ["Active subscribers", String(input.activeCount)],
     ],
     cta: { label: "Open the mailing list", url: `${config.siteUrl}/admin/newsletter` },
+    kind: "admin",
   });
   return sendEmail({
     to: config.notifyEmail,

@@ -9,6 +9,7 @@ const good = {
   API_PUBLIC_URL: "https://api.miroadmap.co",
   PUBLIC_SITE_URL: "https://miroadmap.co",
   FRONTEND_URL: "https://miroadmap.co,https://www.miroadmap.co",
+  MAIL_POSTAL_ADDRESS: "123 Example Street, Toronto, ON, Canada",
   STRIPE_SECRET_KEY: "sk_live_x",
 } as NodeJS.ProcessEnv;
 
@@ -37,4 +38,13 @@ test("missing mail settings, local URLs, test keys and the rate-limit switch are
   assert.ok(warnings.some((w) => w.startsWith("FRONTEND_URL")));
   assert.ok(warnings.some((w) => w.startsWith("DISABLE_RATE_LIMITS")));
   assert.ok(warnings.some((w) => w.startsWith("STRIPE_SECRET_KEY")));
+});
+
+test("partial Mailchimp configuration is reported", () => {
+  const warnings = productionEnvWarnings({
+    ...good,
+    MAILCHIMP_API_KEY: "key-us1",
+  });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /Mailchimp configuration is incomplete/);
 });

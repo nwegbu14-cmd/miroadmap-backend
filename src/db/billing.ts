@@ -3,6 +3,7 @@ import {
   db,
 } from "../../miroadmap-schema/src/prisma/db.ts";
 import { stripePriceId } from "../lib/stripe.ts";
+import { queueNotificationEmail } from "../lib/notification-mail.ts";
 import { getPaymentProviderSummary } from "./stripe-billing.ts";
 import { userAcceptsNotification } from "./notifications.ts";
 
@@ -219,6 +220,7 @@ export async function simulateTesterCheckout(input: {
   const plan = await getPlan(input.planCode, input.interval);
   if (!plan) throw new Error("The selected tester plan is unavailable");
 
+  let emailNotificationId: string | undefined;
   await db.transaction(async (tx) => {
     const existing = await tx.orm.public.Subscription
       .select("id", "planId", "status")
@@ -286,7 +288,7 @@ export async function simulateTesterCheckout(input: {
 
     if (await userAcceptsNotification(tx, input.userId, "BILLING")) {
       const dedupeKey = `billing:tester-invoice:${invoice.id}`;
-      await tx.orm.public.Notification.upsert({
+      const notification = await tx.orm.public.Notification.select("id").upsert({
         create: {
           userId: input.userId,
           type: existing ? "SUBSCRIPTION_CHANGED" : "SUBSCRIPTION_STARTED",
@@ -304,8 +306,10 @@ export async function simulateTesterCheckout(input: {
         update: { dedupeKey },
         conflictOn: { dedupeKey },
       });
+      emailNotificationId = notification.id;
     }
   });
+  if (emailNotificationId) await queueNotificationEmail(emailNotificationId);
 
   return getBillingOverview(input.userId);
 }
@@ -313,6 +317,7 @@ export async function simulateTesterCheckout(input: {
 export async function cancelTesterSubscription(userId: string) {
   await connectDatabase();
 
+  let emailNotificationId: string | undefined;
   await db.transaction(async (tx) => {
     const existing = await tx.orm.public.Subscription
       .select("id", "status")
@@ -340,7 +345,7 @@ export async function cancelTesterSubscription(userId: string) {
 
     if (await userAcceptsNotification(tx, userId, "BILLING")) {
       const dedupeKey = `billing:tester-canceled:${activity.id}`;
-      await tx.orm.public.Notification.upsert({
+      const notification = await tx.orm.public.Notification.select("id").upsert({
         create: {
           userId,
           type: "SUBSCRIPTION_CANCELED",
@@ -358,8 +363,10 @@ export async function cancelTesterSubscription(userId: string) {
         update: { dedupeKey },
         conflictOn: { dedupeKey },
       });
+      emailNotificationId = notification.id;
     }
   });
+  if (emailNotificationId) await queueNotificationEmail(emailNotificationId);
 
   return getBillingOverview(userId);
 }

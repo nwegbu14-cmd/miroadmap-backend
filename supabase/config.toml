@@ -245,10 +245,13 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-# Uncomment to customize email template
-# [auth.email.template.invite]
-# subject = "You have been invited"
-# content_path = "./supabase/templates/invite.html"
+[auth.email.template.invite]
+subject = "You have been invited to MiRoadmap"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.template.confirmation]
+subject = "Your MiRoadmap verification code"
+content_path = "./supabase/templates/confirmation.html"
 
 # `signInWithOtp` uses the magic-link template. Rendering `.Token` changes the
 # local email from a clickable magic link to the six-digit code used by the UI.
@@ -260,11 +263,48 @@ content_path = "./supabase/templates/magic_link.html"
 subject = "Reset your MiRoadmap password"
 content_path = "./supabase/templates/recovery.html"
 
-# Uncomment to customize notification email template
-# [auth.email.notification.password_changed]
-# enabled = true
-# subject = "Your password has been changed"
-# content_path = "./supabase/templates/password_changed_notification.html"
+[auth.email.template.email_change]
+subject = "Confirm your new MiRoadmap email"
+content_path = "./supabase/templates/email_change.html"
+
+[auth.email.template.reauthentication]
+subject = "{{ .Token }} is your MiRoadmap verification code"
+content_path = "./supabase/templates/reauthentication.html"
+
+[auth.email.notification.password_changed]
+enabled = true
+subject = "Your MiRoadmap password was changed"
+content_path = "./supabase/templates/password_changed_notification.html"
+
+[auth.email.notification.email_changed]
+enabled = true
+subject = "Your MiRoadmap email was changed"
+content_path = "./supabase/templates/email_changed_notification.html"
+
+[auth.email.notification.phone_changed]
+enabled = true
+subject = "Your MiRoadmap phone number was changed"
+content_path = "./supabase/templates/phone_changed_notification.html"
+
+[auth.email.notification.identity_linked]
+enabled = true
+subject = "A sign-in method was added to your MiRoadmap account"
+content_path = "./supabase/templates/identity_linked_notification.html"
+
+[auth.email.notification.identity_unlinked]
+enabled = true
+subject = "A sign-in method was removed from your MiRoadmap account"
+content_path = "./supabase/templates/identity_unlinked_notification.html"
+
+[auth.email.notification.mfa_factor_enrolled]
+enabled = true
+subject = "A verification method was added to your MiRoadmap account"
+content_path = "./supabase/templates/mfa_factor_enrolled_notification.html"
+
+[auth.email.notification.mfa_factor_unenrolled]
+enabled = true
+subject = "A verification method was removed from your MiRoadmap account"
+content_path = "./supabase/templates/mfa_factor_unenrolled_notification.html"
 
 [auth.sms]
 # Allow/disallow new user signups via SMS to your project.

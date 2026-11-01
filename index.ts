@@ -19,7 +19,7 @@ import {
 import { roadmapsRouter } from "./src/routes/roadmaps.ts";
 import { storiesRouter } from "./src/routes/stories.ts";
 import { feedbackRouter } from "./src/routes/feedback.ts";
-import { adminNewsletterRouter, newsletterRouter } from "./src/routes/newsletter.ts";
+import { adminNewsletterRouter, mailchimpWebhookHandler, newsletterRouter } from "./src/routes/newsletter.ts";
 import { adminPartnershipsRouter, partnershipsRouter } from "./src/routes/partnerships.ts";
 import { supportRouter } from "./src/routes/support.ts";
 import {
@@ -29,6 +29,7 @@ import {
 import { logRequests } from "./src/middleware/request-logging.ts";
 import { productionEnvWarnings } from "./src/lib/env-check.ts";
 import { errorLogFields, runtimeLog } from "./src/lib/runtime-log.ts";
+import { startNotificationEmailWorker } from "./src/lib/notification-mail.ts";
 
 const config = getConfig();
 const app = express();
@@ -81,6 +82,12 @@ app.use(cors);
 // Stripe signature verification requires the exact raw request bytes. This
 // route must remain before the application-wide JSON parser.
 app.post("/api/billing/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
+app.get("/api/newsletter/mailchimp-webhook", mailchimpWebhookHandler);
+app.post(
+  "/api/newsletter/mailchimp-webhook",
+  express.urlencoded({ extended: true, limit: "100kb" }),
+  mailchimpWebhookHandler,
+);
 // Temporary allowance for compressed inline roadmap images. Reduce this after
 // roadmap media moves to Supabase Storage (see the frontend integration TODO).
 app.use(express.json({ limit: "5mb" }));
@@ -149,6 +156,7 @@ app.listen(config.port, () => {
     runtimeLog("warn", "production_env_warning", { warning });
   }
 });
+startNotificationEmailWorker();
 
 process.on("unhandledRejection", (reason) => {
   runtimeLog("error", "unhandled_rejection", errorLogFields(reason));

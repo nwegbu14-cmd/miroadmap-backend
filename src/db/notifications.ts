@@ -10,6 +10,7 @@ import {
   type NotificationListOptions,
   type NotificationPreferences,
 } from "../domain/notifications.ts";
+import { queueNotificationEmail } from "../lib/notification-mail.ts";
 
 export type NotificationCategory =
   | "ROADMAP"
@@ -117,6 +118,10 @@ export async function createNotification(input: CreateNotificationInput) {
         conflictOn: { dedupeKey: input.dedupeKey },
       })
     : await selected.create(create);
+
+  if (["ACCOUNT", "BILLING", "SUPPORT", "VERIFICATION", "DEADLINE", "SYSTEM"].includes(category)) {
+    await queueNotificationEmail(created.id);
+  }
 
   return serializeNotification(created);
 }

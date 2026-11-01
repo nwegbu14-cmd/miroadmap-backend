@@ -12,6 +12,8 @@ export type MailConfig = {
   pass: string | undefined;
   from: string;
   notifyEmail: string;
+  supportEmail: string;
+  businessAddress: string;
   apiPublicUrl: string;
   siteUrl: string;
 };
@@ -26,6 +28,8 @@ export function getMailConfig(): MailConfig {
     pass: env.SMTP_PASS || undefined,
     from: env.MAIL_FROM?.trim() || "MiRoadmap <no-reply@miroadmap.co>",
     notifyEmail: env.TEAM_NOTIFY_EMAIL?.trim() || env.NEWSLETTER_NOTIFY_EMAIL?.trim() || "inquire@miroadmap.co",
+    supportEmail: env.SUPPORT_EMAIL?.trim() || "support@miroadmap.co",
+    businessAddress: env.MAIL_POSTAL_ADDRESS?.trim() || "Toronto, Ontario, Canada",
     apiPublicUrl: (env.API_PUBLIC_URL?.trim() || `http://127.0.0.1:${config.port}`).replace(/\/$/, ""),
     siteUrl: (env.PUBLIC_SITE_URL?.trim() || config.frontendUrl).replace(/\/$/, ""),
   };
@@ -101,10 +105,21 @@ export type BrandedEmail = {
   cta?: { label: string; url: string };
   note?: string;
   facts?: Array<[label: string, value: string]>;
+  tone?: "brand" | "success" | "warning" | "danger" | "neutral";
+  kind?: "transactional" | "marketing" | "admin";
+  unsubscribeUrl?: string;
 };
 
 // Same layout as supabase/templates/recovery.html so every message looks like the OTP emails.
 export function renderBrandedEmail(email: BrandedEmail): { html: string; text: string } {
+  const config = getMailConfig();
+  const tone = {
+    brand: { background: "#eef1ff", foreground: "#4f6bff" },
+    success: { background: "#ecfdf3", foreground: "#16794a" },
+    warning: { background: "#fff7e8", foreground: "#a15c00" },
+    danger: { background: "#fff0f0", foreground: "#b42318" },
+    neutral: { background: "#f4f4f5", foreground: "#52525b" },
+  }[email.tone ?? "brand"];
   const paragraphs = email.paragraphs
     .map((text) => `<p style="margin:0 0 14px;color:#71717a;font-size:15px;line-height:1.7">${escapeHtml(text)}</p>`)
     .join("");
@@ -122,6 +137,12 @@ export function renderBrandedEmail(email: BrandedEmail): { html: string; text: s
   const note = email.note
     ? `<div style="margin-top:30px;border-top:1px solid #ececf0;padding-top:24px;color:#a1a1aa;font-size:12px;line-height:1.6">${escapeHtml(email.note)}</div>`
     : "";
+  const unsubscribe = email.unsubscribeUrl
+    ? ` &middot; <a href="${escapeHtml(email.unsubscribeUrl)}" style="color:#dfe4ff;text-decoration:underline">Unsubscribe</a>`
+    : "";
+  const address = email.kind === "marketing"
+    ? `<br />${escapeHtml(config.businessAddress)}`
+    : "";
 
   const html = `<!doctype html>
 <html lang="en">
@@ -132,21 +153,21 @@ export function renderBrandedEmail(email: BrandedEmail): { html: string; text: s
   </head>
   <body style="margin:0;padding:0;background:#4f6bff;color:#18181b;font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif">
     <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${escapeHtml(email.preheader)}</div>
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#4f6bff">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background-color:#4f6bff;background-image:linear-gradient(rgba(255,255,255,.10) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.10) 1px,transparent 1px);background-size:48px 48px">
       <tr>
         <td align="center" style="padding:40px 16px">
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:560px">
-            <tr><td align="center" style="padding:0 0 20px;color:#fff;font-size:24px;font-weight:700">MiRoadmap</td></tr>
+            <tr><td align="center" style="padding:0 0 20px"><table role="presentation" cellspacing="0" cellpadding="0" border="0"><tr><td valign="middle" style="padding-right:10px"><img src="https://www.miroadmap.co/logo.png" width="48" height="48" alt="MiRoadmap" style="display:block;width:48px;height:48px;border:0;border-radius:24px;background:#fff" /></td><td valign="middle" style="color:#fff;font-size:22px;font-weight:700;letter-spacing:-.3px">MiRoadmap</td></tr></table></td></tr>
             <tr>
               <td style="border-radius:28px;background:#fff;padding:48px 32px;box-shadow:0 18px 50px rgba(34,49,137,.22)">
                 <div style="text-align:center">
-                  <div style="display:inline-block;border-radius:999px;background:#eef1ff;padding:8px 14px;color:#4f6bff;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase">${escapeHtml(email.badge)}</div>
+                  <div style="display:inline-block;border-radius:999px;background:${tone.background};padding:8px 14px;color:${tone.foreground};font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase">${escapeHtml(email.badge)}</div>
                   <h1 style="margin:22px 0 14px;font-size:30px;line-height:1.2">${escapeHtml(email.title)}</h1>
                   ${paragraphs}${facts}${cta}${note}
                 </div>
               </td>
             </tr>
-            <tr><td align="center" style="padding:22px 12px 0;color:#dfe4ff;font-size:11px">&copy; MiRoadmap &middot; Your next step, made clearer.</td></tr>
+            <tr><td align="center" style="padding:22px 12px 0;color:#dfe4ff;font-size:11px;line-height:1.7">&copy; MiRoadmap &middot; Your next step, made clearer.<br /><a href="${escapeHtml(config.siteUrl)}/privacy" style="color:#dfe4ff;text-decoration:underline">Privacy</a> &middot; <a href="mailto:${escapeHtml(config.supportEmail)}" style="color:#dfe4ff;text-decoration:underline">Contact support</a>${unsubscribe}${address}</td></tr>
           </table>
         </td>
       </tr>
@@ -161,6 +182,11 @@ export function renderBrandedEmail(email: BrandedEmail): { html: string; text: s
     ...(email.facts?.map(([label, value]) => `${label}: ${value}`) ?? []),
     ...(email.cta ? ["", `${email.cta.label}: ${email.cta.url}`] : []),
     ...(email.note ? ["", email.note] : []),
+    "",
+    `Privacy: ${config.siteUrl}/privacy`,
+    `Contact support: ${config.supportEmail}`,
+    ...(email.unsubscribeUrl ? [`Unsubscribe: ${email.unsubscribeUrl}`] : []),
+    ...(email.kind === "marketing" ? [config.businessAddress] : []),
   ].join("\n");
 
   return { html, text };

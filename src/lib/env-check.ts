@@ -6,7 +6,18 @@ export function productionEnvWarnings(env: NodeJS.ProcessEnv): string[] {
   const warnings: string[] = [];
 
   if (!env.SMTP_HOST?.trim()) {
-    warnings.push("SMTP_HOST is not set: newsletter and partnership emails will not be sent");
+    warnings.push("SMTP_HOST is not set: transactional, newsletter, and admin emails will not be sent");
+  }
+  if (!env.MAIL_POSTAL_ADDRESS?.trim()) {
+    warnings.push("MAIL_POSTAL_ADDRESS is not set: marketing emails will be missing the full business mailing address");
+  }
+  const mailchimpValues = [env.MAILCHIMP_API_KEY, env.MAILCHIMP_AUDIENCE_ID, env.MAILCHIMP_WEBHOOK_SECRET]
+    .filter((value) => value?.trim()).length;
+  const serverPrefixAvailable = Boolean(
+    env.MAILCHIMP_SERVER_PREFIX?.trim() || env.MAILCHIMP_API_KEY?.trim().includes("-"),
+  );
+  if (mailchimpValues > 0 && (mailchimpValues < 3 || !serverPrefixAvailable)) {
+    warnings.push("Mailchimp configuration is incomplete: subscriber synchronization or webhooks will not work");
   }
   for (const name of ["API_PUBLIC_URL", "PUBLIC_SITE_URL"] as const) {
     const value = env[name]?.trim();

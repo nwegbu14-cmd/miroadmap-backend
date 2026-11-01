@@ -4,6 +4,7 @@ import {
 } from "../../miroadmap-schema/src/prisma/db.ts";
 import { createVerificationEvidenceSignedUrl } from "../lib/verification-evidence-storage.ts";
 import { userAcceptsNotification } from "./notifications.ts";
+import { queueNotificationEmail } from "../lib/notification-mail.ts";
 
 type VerificationStatus = "PENDING" | "IN_REVIEW" | "APPROVED" | "DECLINED";
 
@@ -137,6 +138,7 @@ export async function updateAdminVerificationRequest(input: {
   const requestedAt = request.requestedAt;
   const instantFactory = requestedAt.constructor as { from(value: string): typeof requestedAt };
   const reviewedAt = instantFactory.from(new Date().toISOString());
+  let emailNotificationId: string | undefined;
   await db.transaction(async (tx) => {
     await tx.orm.public.VerificationRequest.where({ id: request.id }).update({
       status: input.status,
@@ -152,7 +154,7 @@ export async function updateAdminVerificationRequest(input: {
     const dedupeKey = `verification-status:${request.id}:${input.status}`;
     const existingNotification = await tx.orm.public.Notification.select("id").first({ dedupeKey });
     if (!existingNotification && await userAcceptsNotification(tx, request.requesterId, "VERIFICATION")) {
-      await tx.orm.public.Notification.create({
+      const notification = await tx.orm.public.Notification.select("id").create({
         userId: request.requesterId,
         actorId: input.reviewerId,
         type: input.status === "APPROVED" ? "VERIFICATION_APPROVED" : input.status === "DECLINED" ? "VERIFICATION_DECLINED" : "VERIFICATION_IN_REVIEW",
@@ -171,7 +173,9 @@ export async function updateAdminVerificationRequest(input: {
         dedupeKey,
         groupKey: `verification-request:${request.id}`,
       });
+      emailNotificationId = notification.id;
     }
   });
+  if (emailNotificationId) await queueNotificationEmail(emailNotificationId);
   return getAdminVerificationRequest(request.id);
 }

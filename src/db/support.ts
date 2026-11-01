@@ -8,6 +8,8 @@ import type {
   SupportTicketListOptions,
   SupportTicketStatus,
 } from "../domain/support.ts";
+import { queueNotificationEmail } from "../lib/notification-mail.ts";
+import { notifyTeamOfSupportTicket } from "../lib/support-mail.ts";
 import { userAcceptsNotification } from "./notifications.ts";
 
 const supportTicketSelection = [
@@ -46,11 +48,12 @@ function serializeSupportTicket(ticket: {
 export async function createSupportTicket(userId: string, input: CreateSupportTicketInput) {
   await connectDatabase();
   const user = await db.orm.public.User
-    .select("id", "email", "status")
+    .select("id", "email", "fullName", "status")
     .first({ id: userId });
   if (!user || user.status === "DELETED") return null;
 
-  return db.transaction(async (tx) => {
+  let emailNotificationId: string | undefined;
+  const ticket = await db.transaction(async (tx) => {
     const ticket = await tx.orm.public.SupportTicket
       .select("id", "subject", "status", "createdAt")
       .create({
@@ -61,7 +64,7 @@ export async function createSupportTicket(userId: string, input: CreateSupportTi
       });
 
     if (await userAcceptsNotification(tx, userId, "SUPPORT")) {
-      await tx.orm.public.Notification.create({
+      const notification = await tx.orm.public.Notification.select("id").create({
         userId,
         type: "SUPPORT_TICKET_RECEIVED",
         category: "SUPPORT",
@@ -74,6 +77,7 @@ export async function createSupportTicket(userId: string, input: CreateSupportTi
         dedupeKey: `support-ticket:${ticket.id}:received`,
         groupKey: "support-tickets",
       });
+      emailNotificationId = notification.id;
     }
 
     return {
@@ -83,6 +87,15 @@ export async function createSupportTicket(userId: string, input: CreateSupportTi
       createdAt: String(ticket.createdAt),
     };
   });
+  if (emailNotificationId) await queueNotificationEmail(emailNotificationId);
+  await notifyTeamOfSupportTicket({
+    ticketId: ticket.id,
+    email: user.email,
+    fullName: user.fullName,
+    subject: input.subject,
+    message: input.message,
+  });
+  return ticket;
 }
 
 export async function listUserSupportTickets(userId: string) {
@@ -159,6 +172,7 @@ export async function updateSupportTicket(input: {
   const replyChanged = input.adminReply.length > 0 && input.adminReply !== existing.adminReply;
   const statusChanged = input.status !== existing.status;
 
+  let emailNotificationId: string | undefined;
   const updated = await db.transaction(async (tx) => {
     const ticket = await tx.orm.public.SupportTicket
       .select(...supportTicketSelection)
@@ -187,7 +201,7 @@ export async function updateSupportTicket(input: {
         metadata: { ticketId: input.ticketId, status: input.status },
       });
       if (await userAcceptsNotification(tx, String(existing.userId), "SUPPORT")) {
-        await tx.orm.public.Notification.create({
+        const notification = await tx.orm.public.Notification.select("id").create({
           userId: existing.userId,
           actorId: input.actorId,
           type: replyChanged ? "SUPPORT_TICKET_REPLIED" : "SUPPORT_TICKET_STATUS_CHANGED",
@@ -204,12 +218,14 @@ export async function updateSupportTicket(input: {
           dedupeKey: `support-ticket:${input.ticketId}:update:${activity.id}`,
           groupKey: `support-ticket:${input.ticketId}`,
         });
+        emailNotificationId = notification.id;
       }
     }
     return ticket;
   });
 
   if (!updated) return null;
+  if (emailNotificationId) await queueNotificationEmail(emailNotificationId);
   const user = updated.userId
     ? await db.orm.public.User.select("id", "fullName", "email", "status").first({ id: updated.userId })
     : null;

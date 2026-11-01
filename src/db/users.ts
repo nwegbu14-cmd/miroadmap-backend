@@ -2,6 +2,7 @@ import {
   connectDatabase,
   db,
 } from "../../miroadmap-schema/src/prisma/db.ts";
+import { queueNotificationEmail } from "../lib/notification-mail.ts";
 
 import type { AppAccountType, AppRole, AppUserIdentity } from "../types/express.d.ts";
 
@@ -364,6 +365,7 @@ export async function suspendUser(input: {
   const targetCreatedAt = target.createdAt;
   const instantFactory = targetCreatedAt.constructor as { from(value: string): typeof targetCreatedAt };
   const suspendedAt = instantFactory.from(new Date().toISOString());
+  let emailNotificationId: string | undefined;
   await db.transaction(async (tx) => {
     await tx.orm.public.User.where({ id: input.userId }).update({
       status: "SUSPENDED",
@@ -405,12 +407,14 @@ export async function suspendUser(input: {
       update: { dedupeKey },
       conflictOn: { dedupeKey },
     });
+    emailNotificationId = notification.id;
     await tx.orm.public.NotificationDelivery.upsert({
       create: { notificationId: notification.id, channel: "EMAIL" },
       update: { status: "PENDING", failureReason: null },
       conflictOn: { notificationId: notification.id, channel: "EMAIL" },
     });
   });
+  if (emailNotificationId) await queueNotificationEmail(emailNotificationId);
   return getAdminUserDetails(input.userId);
 }
 
@@ -432,6 +436,7 @@ export async function reactivateUser(input: {
   }
   if (target.status !== "SUSPENDED") return getAdminUserDetails(input.userId);
 
+  let emailNotificationId: string | undefined;
   await db.transaction(async (tx) => {
     await tx.orm.public.User.where({ id: input.userId }).update({
       status: "ACTIVE",
@@ -472,12 +477,14 @@ export async function reactivateUser(input: {
       update: { dedupeKey },
       conflictOn: { dedupeKey },
     });
+    emailNotificationId = notification.id;
     await tx.orm.public.NotificationDelivery.upsert({
       create: { notificationId: notification.id, channel: "EMAIL" },
       update: { status: "PENDING", failureReason: null },
       conflictOn: { notificationId: notification.id, channel: "EMAIL" },
     });
   });
+  if (emailNotificationId) await queueNotificationEmail(emailNotificationId);
   return getAdminUserDetails(input.userId);
 }
 

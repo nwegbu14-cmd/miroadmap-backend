@@ -1,14 +1,18 @@
-import { Router } from "express";
+import { timingSafeEqual } from "node:crypto";
+
+import { Router, type RequestHandler } from "express";
 
 import {
   confirmSubscription,
   countActiveSubscribers,
   getMailingListRows,
+  getNewsletterEmail,
   getNewsletterMetrics,
   listSubscribers,
   recordMailingListExport,
   requestSubscription,
   unsubscribe,
+  applyMailchimpStatus,
 } from "../db/newsletter.ts";
 import {
   NEWSLETTER_CONSENT_VERSION,
@@ -21,6 +25,7 @@ import {
   type NewsletterStatus,
 } from "../domain/newsletter.ts";
 import { getMailConfig } from "../lib/email.ts";
+import { syncConfirmedSubscriber, syncUnsubscribedSubscriber } from "../lib/mailchimp.ts";
 import {
   newsletterSecret,
   notifyTeamOfSubscriber,
@@ -55,6 +60,38 @@ function queryText(value: unknown): string | undefined {
   const first = Array.isArray(value) ? value[0] : value;
   return typeof first === "string" ? first : undefined;
 }
+
+function webhookSecretMatches(value: unknown): boolean {
+  const expected = process.env.MAILCHIMP_WEBHOOK_SECRET?.trim() ?? "";
+  const received = typeof value === "string" ? value : "";
+  if (!expected || expected.length !== received.length) return false;
+  return timingSafeEqual(Buffer.from(expected), Buffer.from(received));
+}
+
+export const mailchimpWebhookHandler: RequestHandler = (request, response) => {
+  if (!webhookSecretMatches(request.query.secret)) {
+    response.status(401).send("Unauthorized");
+    return;
+  }
+  if (request.method === "GET") {
+    response.status(200).send("MiRoadmap Mailchimp webhook");
+    return;
+  }
+
+  const type = typeof request.body?.type === "string" ? request.body.type.toLowerCase() : "";
+  const data = request.body?.data && typeof request.body.data === "object"
+    ? request.body.data as Record<string, unknown>
+    : {};
+  const email = typeof data.email === "string" ? data.email.trim().toLowerCase() : "";
+  const reason = typeof data.reason === "string" ? data.reason.toLowerCase() : "";
+  const status = type === "unsubscribe"
+    ? "UNSUBSCRIBED" as const
+    : type === "cleaned" && reason.includes("abuse")
+      ? "COMPLAINED" as const
+      : type === "cleaned" ? "BOUNCED" as const : null;
+  response.sendStatus(204);
+  if (email && status) background("mailchimp_webhook", () => applyMailchimpStatus(email, status));
+};
 
 // The same reply for new and known addresses, so the form cannot be used to probe the list.
 const acceptedMessage = "Check your inbox for an email to confirm your subscription.";
@@ -103,6 +140,7 @@ newsletterRouter.get("/confirm", tokenRateLimit, async (request, response) => {
       await Promise.all([
         sendWelcomeEmail({ id, email: result.email }),
         notifyTeamOfSubscriber({ email: result.email, source: result.source, activeCount }),
+        syncConfirmedSubscriber({ email: result.email, source: result.source }),
       ]);
     });
   }
@@ -124,6 +162,10 @@ newsletterRouter.post("/unsubscribe", tokenRateLimit, async (request, response) 
     return;
   }
   response.json({ unsubscribed: true });
+  background("mailchimp_unsubscribe", async () => {
+    const email = await getNewsletterEmail(id);
+    if (email) await syncUnsubscribedSubscriber(email);
+  });
 });
 
 adminNewsletterRouter.use(authenticate, requireRoles("ADMIN", "SUPER_ADMIN"));
