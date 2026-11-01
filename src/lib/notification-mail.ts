@@ -211,7 +211,7 @@ async function deliverNotificationEmail(notificationId: string): Promise<void> {
       replyTo: notification.category === "SUPPORT" ? getMailConfig().supportEmail : undefined,
     });
     await db.orm.public.NotificationDelivery.where({ id: delivery.id }).update(result.sent
-      ? { status: "SENT", sentAt: lastAttemptAt, failureReason: null }
+      ? { status: "SENT", sentAt: lastAttemptAt, providerId: result.providerId ?? null, failureReason: null }
       : result.reason === "smtp_not_configured"
         ? { status: "SKIPPED", failureReason: result.reason }
         : { status: "FAILED", failureReason: result.reason });
@@ -263,6 +263,35 @@ function scheduleDrain() {
       runtimeLog("error", "notification_email_worker_failed", errorLogFields(error));
     });
   });
+}
+
+export async function retryFailedNotificationEmails(): Promise<number> {
+  await connectDatabase();
+  const failed = await db.orm.public.NotificationDelivery
+    .select("id", "failureReason")
+    .where({ status: "FAILED", channel: "EMAIL" })
+    .all();
+  const retryable = failed.filter((delivery) => isRetryableEmailFailure(delivery.failureReason));
+  for (const delivery of retryable) {
+    await db.orm.public.NotificationDelivery.where({ id: delivery.id }).update({
+      status: "PENDING",
+      attempts: 0,
+      failureReason: null,
+    });
+  }
+  const count = retryable.length;
+  if (count > 0) scheduleDrain();
+  return count;
+}
+
+export function isRetryableEmailFailure(reason: string | null): boolean {
+  const normalized = reason?.toLowerCase() ?? "";
+  return ![
+    "bounced:",
+    "failed:",
+    "suppressed:",
+    "recipient reported",
+  ].some((prefix) => normalized.startsWith(prefix));
 }
 
 export async function queueNotificationEmail(notificationId: string): Promise<void> {

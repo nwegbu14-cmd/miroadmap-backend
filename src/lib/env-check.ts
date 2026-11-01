@@ -7,6 +7,16 @@ export function productionEnvWarnings(env: NodeJS.ProcessEnv): string[] {
 
   if (!env.SMTP_HOST?.trim()) {
     warnings.push("SMTP_HOST is not set: transactional, newsletter, and admin emails will not be sent");
+  } else {
+    if (!env.SMTP_USER?.trim() || !env.SMTP_PASS?.trim()) {
+      warnings.push("SMTP authentication is incomplete: set SMTP_USER and SMTP_PASS for production delivery");
+    }
+    if (!env.MAIL_FROM?.trim()) {
+      warnings.push("MAIL_FROM is not set: outgoing email will use the default sender address");
+    }
+    if (env.SMTP_HOST.toLowerCase().includes("resend") && !env.RESEND_WEBHOOK_SECRET?.trim()) {
+      warnings.push("RESEND_WEBHOOK_SECRET is not set: delivered, bounced, and complained statuses will not be tracked");
+    }
   }
   if (!env.MAIL_POSTAL_ADDRESS?.trim()) {
     warnings.push("MAIL_POSTAL_ADDRESS is not set: marketing emails will be missing the full business mailing address");

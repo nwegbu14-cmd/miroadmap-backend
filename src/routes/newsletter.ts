@@ -9,6 +9,7 @@ import {
   getNewsletterEmail,
   getNewsletterMetrics,
   listSubscribers,
+  recordMailchimpSync,
   recordMailingListExport,
   requestSubscription,
   unsubscribe,
@@ -25,7 +26,7 @@ import {
   type NewsletterStatus,
 } from "../domain/newsletter.ts";
 import { getMailConfig } from "../lib/email.ts";
-import { syncConfirmedSubscriber, syncUnsubscribedSubscriber } from "../lib/mailchimp.ts";
+import { mailchimpConfigured, syncConfirmedSubscriber, syncUnsubscribedSubscriber } from "../lib/mailchimp.ts";
 import {
   newsletterSecret,
   notifyTeamOfSubscriber,
@@ -179,7 +180,44 @@ adminNewsletterRouter.get("/", async (request, response) => {
     listSubscribers({ status, limit: 500 }),
     getNewsletterMetrics(),
   ]);
-  response.json({ subscribers, metrics });
+  response.json({
+    subscribers,
+    metrics,
+    integration: {
+      mailchimpConfigured: mailchimpConfigured(),
+      webhookConfigured: Boolean(process.env.MAILCHIMP_WEBHOOK_SECRET?.trim()),
+    },
+  });
+});
+
+adminNewsletterRouter.post("/sync-mailchimp", async (request, response) => {
+  if (!mailchimpConfigured()) {
+    response.status(409).json({ error: "Mailchimp is waiting for its environment variables" });
+    return;
+  }
+
+  const rows = await getMailingListRows("ACTIVE");
+  let synced = 0;
+  let failed = 0;
+  const batchSize = 10;
+  for (let offset = 0; offset < rows.length; offset += batchSize) {
+    const results = await Promise.allSettled(rows.slice(offset, offset + batchSize).map((row) =>
+      syncConfirmedSubscriber({ email: row.emailNormalized, source: row.source })));
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value) synced += 1;
+      else failed += 1;
+    }
+  }
+
+  await recordMailchimpSync({
+    actorId: request.appUser!.id,
+    requested: rows.length,
+    synced,
+    failed,
+    ip: request.ip,
+    userAgent: request.header("user-agent"),
+  });
+  response.json({ requested: rows.length, synced, failed });
 });
 
 adminNewsletterRouter.get("/export", async (request, response) => {

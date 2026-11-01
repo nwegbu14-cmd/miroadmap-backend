@@ -6,6 +6,9 @@ import { productionEnvWarnings } from "./env-check.ts";
 const good = {
   NODE_ENV: "production",
   SMTP_HOST: "smtp.example.com",
+  SMTP_USER: "resend",
+  SMTP_PASS: "re_secret",
+  MAIL_FROM: "MiRoadmap <no-reply@miroadmap.co>",
   API_PUBLIC_URL: "https://api.miroadmap.co",
   PUBLIC_SITE_URL: "https://miroadmap.co",
   FRONTEND_URL: "https://miroadmap.co,https://www.miroadmap.co",
@@ -47,4 +50,19 @@ test("partial Mailchimp configuration is reported", () => {
   });
   assert.equal(warnings.length, 1);
   assert.match(warnings[0]!, /Mailchimp configuration is incomplete/);
+});
+
+test("Resend SMTP requires authentication and delivery webhook settings", () => {
+  const warnings = productionEnvWarnings({
+    ...good,
+    SMTP_HOST: "smtp.resend.com",
+    SMTP_USER: "",
+    SMTP_PASS: "",
+    MAIL_FROM: "",
+    RESEND_WEBHOOK_SECRET: "",
+  });
+  assert.equal(warnings.length, 3);
+  assert.ok(warnings.some((warning) => warning.startsWith("SMTP authentication")));
+  assert.ok(warnings.some((warning) => warning.startsWith("MAIL_FROM")));
+  assert.ok(warnings.some((warning) => warning.startsWith("RESEND_WEBHOOK_SECRET")));
 });

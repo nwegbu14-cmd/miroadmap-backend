@@ -9,6 +9,7 @@ import { adminStoriesRouter } from "./src/routes/admin-stories.ts";
 import { adminFeedbackRouter } from "./src/routes/admin-feedback.ts";
 import { adminUsersRouter } from "./src/routes/admin-users.ts";
 import { adminSupportRouter } from "./src/routes/admin-support.ts";
+import { adminEmailRouter } from "./src/routes/admin-email.ts";
 import { adminVerificationsRouter } from "./src/routes/admin-verifications.ts";
 import { authRouter } from "./src/routes/auth.ts";
 import { billingRouter, stripeWebhookHandler } from "./src/routes/billing.ts";
@@ -20,6 +21,7 @@ import { roadmapsRouter } from "./src/routes/roadmaps.ts";
 import { storiesRouter } from "./src/routes/stories.ts";
 import { feedbackRouter } from "./src/routes/feedback.ts";
 import { adminNewsletterRouter, mailchimpWebhookHandler, newsletterRouter } from "./src/routes/newsletter.ts";
+import { resendWebhookHandler } from "./src/routes/resend-webhook.ts";
 import { adminPartnershipsRouter, partnershipsRouter } from "./src/routes/partnerships.ts";
 import { supportRouter } from "./src/routes/support.ts";
 import {
@@ -82,6 +84,11 @@ app.use(cors);
 // Stripe signature verification requires the exact raw request bytes. This
 // route must remain before the application-wide JSON parser.
 app.post("/api/billing/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
+app.post(
+  "/api/email/resend-webhook",
+  express.raw({ type: "application/json", limit: "256kb" }),
+  resendWebhookHandler,
+);
 app.get("/api/newsletter/mailchimp-webhook", mailchimpWebhookHandler);
 app.post(
   "/api/newsletter/mailchimp-webhook",
@@ -104,6 +111,7 @@ app.use("/api/partnerships", partnershipsRouter);
 app.use("/api/support", supportRouter);
 app.use("/api/admin/analytics", adminAnalyticsRouter);
 app.use("/api/admin/feedback", adminFeedbackRouter);
+app.use("/api/admin/email", adminEmailRouter);
 app.use("/api/admin/newsletter", adminNewsletterRouter);
 app.use("/api/admin/partnerships", adminPartnershipsRouter);
 app.use("/api/admin/roadmaps", adminRoadmapsRouter);

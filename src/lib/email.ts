@@ -62,7 +62,7 @@ export type OutgoingEmail = {
   replyTo?: string;
 };
 
-export type SendResult = { sent: true } | { sent: false; reason: "smtp_not_configured" | "send_failed" };
+export type SendResult = { sent: true; providerId?: string } | { sent: false; reason: "smtp_not_configured" | "send_failed" };
 
 // Mail never blocks or fails the request that triggered it: failures are logged and reported.
 export async function sendEmail(email: OutgoingEmail): Promise<SendResult> {
@@ -72,7 +72,7 @@ export async function sendEmail(email: OutgoingEmail): Promise<SendResult> {
     return { sent: false, reason: "smtp_not_configured" };
   }
   try {
-    await transporterFor(config).sendMail({
+    const result = await transporterFor(config).sendMail({
       from: config.from,
       to: email.to,
       subject: email.subject,
@@ -81,7 +81,12 @@ export async function sendEmail(email: OutgoingEmail): Promise<SendResult> {
       headers: email.headers,
       replyTo: email.replyTo,
     });
-    return { sent: true };
+    return {
+      sent: true,
+      providerId: typeof result.messageId === "string" && result.messageId.trim()
+        ? result.messageId.trim()
+        : undefined,
+    };
   } catch (error) {
     runtimeLog("error", "email_send_failed", { subject: email.subject, ...errorLogFields(error) });
     return { sent: false, reason: "send_failed" };

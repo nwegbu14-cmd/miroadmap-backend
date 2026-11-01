@@ -238,3 +238,23 @@ export async function recordMailingListExport(input: {
     userAgent: input.userAgent,
   });
 }
+
+export async function recordMailchimpSync(input: {
+  actorId: string;
+  requested: number;
+  synced: number;
+  failed: number;
+  ip?: string;
+  userAgent?: string;
+}) {
+  await connectDatabase();
+  await db.orm.public.AdminAuditLog.create({
+    actorId: input.actorId,
+    action: "NEWSLETTER_MAILCHIMP_SYNCED",
+    targetType: "NewsletterSubscription",
+    targetId: "mailchimp-audience",
+    after: { requested: input.requested, synced: input.synced, failed: input.failed },
+    ip: input.ip,
+    userAgent: input.userAgent,
+  });
+}

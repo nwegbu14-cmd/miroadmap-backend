@@ -35,7 +35,7 @@ Store only a hash of confirmation and unsubscribe tokens. Rate-limit by IP and n
 - Newsletter consent is separate from account creation and paid subscriptions.
 - Creating an account must not silently subscribe someone to marketing email.
 - Transactional account, security, moderation, and billing messages do not depend on newsletter consent.
-- A future email provider should process delivery, bounce, and complaint webhooks idempotently.
+- The email provider processes signed delivery, bounce, complaint, failure, and suppression webhooks.
 
 ## Delivery plan
 
@@ -44,14 +44,14 @@ Store only a hash of confirmation and unsubscribe tokens. Rate-limit by IP and n
 3. Choose an email provider and add signed webhook handling.
 4. Wire the footer only after persistence and double opt-in are available. Until then, do not show a false success message or retain emails in browser storage.
 
-## Implementation status (2026-10-26)
+## Implementation status (2026-10-31)
 
-Steps 1, 2 and 4 are built; step 3 (provider webhooks) is not.
+All four steps are built. Provider credentials and dashboard-side webhook registration remain activation tasks; see `docs/EMAIL_OPERATIONS.md`.
 
 - **Schema:** `NewsletterSubscription` in `miroadmap-schema/src/prisma/contract.prisma`. Applied to the local database with `prisma db update`; production needs a proper migration (`prisma migration plan`). Tokens are stateless HMACs instead of stored hashes, so the token columns above are not needed. `confirmationSentAt` throttles resends (10 minutes).
 - **Public API:** `POST /api/newsletter/subscriptions` (JSON, explicit `consent: true`, honeypot field `website`, 5 requests per 15 minutes per IP, same 202 reply for new and known addresses), `GET /api/newsletter/confirm?token=` (redirects to the site), and `POST /api/newsletter/unsubscribe` (token in the body or query; also serves the RFC 8058 one-click header).
-- **Admin API (ADMIN, SUPER_ADMIN):** `GET /api/admin/newsletter` and `GET /api/admin/newsletter/export?format=mailchimp|google|full`. Mailchimp and Google exports contain confirmed subscribers only. Every export is written to `AdminAuditLog`.
+- **Admin API (ADMIN, SUPER_ADMIN):** `GET /api/admin/newsletter`, `POST /api/admin/newsletter/sync-mailchimp`, and `GET /api/admin/newsletter/export?format=mailchimp|google|full`. Confirmed subscribers synchronize automatically and the POST endpoint backfills existing active subscribers. Mailchimp and Google exports contain confirmed subscribers only. Every sync and export is written to `AdminAuditLog`.
 - **Email pipeline:** `src/lib/email.ts` sends over SMTP (`SMTP_*`, `MAIL_FROM`) and renders the same branded layout as `supabase/templates/recovery.html`. Supabase Auth can only send its own auth emails, so the backend sends these itself; in production point both at the same SMTP provider. Messages: confirmation, welcome (with `List-Unsubscribe` headers), and a notice to `TEAM_NOTIFY_EMAIL` (formerly `NEWSLETTER_NOTIFY_EMAIL`, still read as a fallback; default `inquire@miroadmap.co`) when someone confirms.
-- **Frontend:** footer form (checkbox consent, honeypot, success and error text), `/newsletter/confirmed`, `/newsletter/unsubscribe`, and `/admin/newsletter` with metrics, search, status filter and CSV downloads.
+- **Frontend:** footer form (checkbox consent, honeypot, success and error text), `/newsletter/confirmed`, `/newsletter/unsubscribe`, and `/admin/newsletter` with provider readiness, one-click Mailchimp backfill, metrics, search, status filter and CSV backups.
 - **Local setup:** `smtp_port = 54325` is enabled under `[local_smtp]` in `supabase/config.toml`; restart the stack (`npx supabase stop && npx supabase start`) so Mailpit accepts mail from the API.
 - **Tests:** `src/domain/newsletter.test.ts` (unit) and the "Newsletter" section of `src/scripts/e2e-platform.ts`.
