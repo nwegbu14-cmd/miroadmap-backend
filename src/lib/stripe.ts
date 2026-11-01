@@ -2,25 +2,26 @@ import Stripe from "stripe";
 
 let stripeClient: Stripe | undefined;
 
-export type StripeMode = "STRIPE_TEST" | "NOT_CONFIGURED";
+export type StripeMode = "STRIPE_TEST" | "STRIPE_LIVE" | "NOT_CONFIGURED";
 
 export function getStripeMode(): StripeMode {
-  return process.env.STRIPE_SECRET_KEY?.trim().startsWith("sk_test_")
-    ? "STRIPE_TEST"
-    : "NOT_CONFIGURED";
+  const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
+  if (secretKey?.startsWith("sk_test_")) return "STRIPE_TEST";
+  if (secretKey?.startsWith("sk_live_")) return "STRIPE_LIVE";
+  return "NOT_CONFIGURED";
 }
 
 export function stripeConfigured(): boolean {
-  return getStripeMode() === "STRIPE_TEST";
+  return getStripeMode() !== "NOT_CONFIGURED";
 }
 
 export function getStripe(): Stripe {
   const secretKey = process.env.STRIPE_SECRET_KEY?.trim();
   if (!secretKey) {
-    throw new Error("Stripe test mode is not configured");
+    throw new Error("Stripe is not configured");
   }
-  if (!secretKey.startsWith("sk_test_")) {
-    throw new Error("MiRoadmap checkout currently accepts Stripe test-mode keys only");
+  if (!secretKey.startsWith("sk_test_") && !secretKey.startsWith("sk_live_")) {
+    throw new Error("STRIPE_SECRET_KEY must be a Stripe secret key");
   }
 
   stripeClient ??= new Stripe(secretKey, {

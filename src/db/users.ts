@@ -275,12 +275,17 @@ export async function syncAuthenticatedUser(input: SyncUserInput): Promise<AppUs
 export async function listUsers(limit = 100) {
   await connectDatabase();
   const users = await db.orm.public.User
-    .select("id", "email", "fullName", "role", "status", "accountType", "createdAt")
+    .select("id", "email", "fullName", "role", "status", "accountType", "lastActiveAt", "createdAt")
     .orderBy((user) => user.createdAt.desc())
     .limit(Math.min(Math.max(limit, 1), 250))
     .all();
 
-  return users.map((user) => ({ ...user, id: String(user.id) }));
+  return Promise.all(users.map(async (user) => {
+    const savedRoadmaps = await db.orm.public.RoadmapFollow
+      .where({ userId: String(user.id) })
+      .aggregate((follow) => ({ count: follow.count() }));
+    return { ...user, id: String(user.id), savedRoadmaps: savedRoadmaps.count };
+  }));
 }
 
 export async function getAdminUserDetails(id: string) {
@@ -302,7 +307,7 @@ export async function getAdminUserDetails(id: string) {
 
   if (!user) return null;
 
-  const [profile, activities, subscription] = await Promise.all([
+  const [profile, activities, subscription, savedRoadmaps] = await Promise.all([
     db.orm.public.Profile
       .select("residencyStatus", "lengthOfStay", "mainGoal", "province", "howHeard")
       .first({ userId: id }),
@@ -315,6 +320,9 @@ export async function getAdminUserDetails(id: string) {
     db.orm.public.Subscription
       .select("id", "planId", "status", "isComped", "currentPeriodEnd")
       .first({ userId: id }),
+    db.orm.public.RoadmapFollow
+      .where({ userId: id })
+      .aggregate((follow) => ({ count: follow.count() })),
   ]);
 
   const plan = subscription
@@ -334,6 +342,7 @@ export async function getAdminUserDetails(id: string) {
   return {
     ...user,
     id: String(user.id),
+    savedRoadmaps: savedRoadmaps.count,
     profile,
     activities,
     subscription: subscription ? { ...subscription, plan, invoices } : null,

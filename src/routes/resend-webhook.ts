@@ -4,8 +4,6 @@ import type { RequestHandler } from "express";
 import { connectDatabase, db } from "../../miroadmap-schema/src/prisma/db.ts";
 import { errorLogFields, runtimeLog } from "../lib/runtime-log.ts";
 
-const resend = new Resend();
-
 function signatureHeader(request: Parameters<RequestHandler>[0], name: string): string {
   return request.header(name)?.trim() ?? "";
 }
@@ -54,6 +52,14 @@ export const resendWebhookHandler: RequestHandler = async (request, response) =>
 
   let event: WebhookEventPayload;
   try {
+    // Webhook signature verification does not call the Resend API, but the SDK
+    // constructor still requires a key. Build it lazily so an unconfigured
+    // optional provider can never prevent the development server from booting.
+    const resend = new Resend(
+      process.env.RESEND_API_KEY?.trim()
+        || process.env.SMTP_PASS?.trim()
+        || "re_webhook_verification_only",
+    );
     event = resend.webhooks.verify({
       payload,
       headers: {

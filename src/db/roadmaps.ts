@@ -5,6 +5,7 @@ import {
   db,
 } from "../../miroadmap-schema/src/prisma/db.ts";
 import { getAvatarPublicUrl } from "../lib/avatar-storage.ts";
+import { createdRoadmapLimit } from "../domain/entitlements.ts";
 import { userAcceptsNotification } from "./notifications.ts";
 
 export type RoadmapAssetInput = {
@@ -166,6 +167,7 @@ export class RoadmapMutationError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -302,13 +304,54 @@ export async function createRoadmapDraft(
     fullName: string;
     avatarPath?: string | null;
     role: "USER" | "MODERATOR" | "ADMIN" | "SUPER_ADMIN";
+    accountType: "STANDARD" | "TESTER" | "DEMO" | "INTERNAL";
   },
 ): Promise<RoadmapRecord> {
   await connectDatabase();
 
+  const privileged = user.role !== "USER"
+    || user.accountType === "INTERNAL"
+    || user.accountType === "DEMO";
   const snapshot: StoredRoadmapSnapshot = input;
 
   return db.transaction(async (tx) => {
+    if (!privileged) {
+      // Serialize quota checks for one author. The no-op update takes a row lock,
+      // so concurrent creates cannot both observe the same remaining slot.
+      await tx.orm.public.User.where({ id: user.id }).update({ fullName: user.fullName });
+      const subscription = await tx.orm.public.Subscription
+        .select("planId", "status")
+        .first({ userId: user.id });
+      const entitlement = subscription
+        ? await tx.orm.public.PlanEntitlement
+            .select("limitBool", "limitInt")
+            .first({ planId: subscription.planId, key: "MAX_CREATED_ROADMAPS" })
+        : null;
+      const limit = createdRoadmapLimit({
+        privileged,
+        subscriptionStatus: subscription?.status,
+        entitlementEnabled: entitlement?.limitBool,
+        entitlementLimit: entitlement?.limitInt,
+      });
+
+      if (limit !== null) {
+        const roadmaps = await tx.orm.public.Roadmap
+          .select("status")
+          .where({ authorId: user.id })
+          .all();
+        const activeCount = roadmaps.filter((roadmap) => roadmap.status !== "ARCHIVED").length;
+        if (activeCount >= limit) {
+          throw new RoadmapMutationError(
+            limit === 1
+              ? "Your current plan includes one roadmap. Upgrade to create another."
+              : `Your current plan includes ${limit} roadmaps. Upgrade to create another.`,
+            409,
+            "ROADMAP_CREATION_LIMIT_REACHED",
+          );
+        }
+      }
+    }
+
     const categorySlug = slugify(input.category);
     let category = await tx.orm.public.Category.select("id").first({ slug: categorySlug });
     category ??= await tx.orm.public.Category.select("id").create({

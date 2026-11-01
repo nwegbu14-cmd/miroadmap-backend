@@ -402,6 +402,19 @@ async function main() {
     created.roadmaps.push({ id: draft.id, token: creatorToken });
     expect(draft.status === "draft", `status ${draft.status}`);
   });
+  await check("Free users cannot create more than one roadmap", async () => {
+    const second = await api("POST", "/api/roadmaps", {
+      token: creatorToken,
+      body: roadmapBody(`E2E Free Limit ${RUN}`),
+    });
+    expectStatus(second, 409, "free creation limit");
+    expect(second.body.code === "ROADMAP_CREATION_LIMIT_REACHED", JSON.stringify(second.body));
+
+    // The remainder of this platform suite intentionally creates many fixtures.
+    // DEMO accounts are privileged by the same entitlement policy as internal users.
+    await connectDatabase();
+    await db.orm.public.User.where({ id: creatorId }).update({ accountType: "DEMO" });
+  });
   await check("Draft is listed in /mine and readable by owner only", async () => {
     const mine = await api("GET", "/api/roadmaps/mine", { token: creatorToken });
     expect(mine.body.roadmaps.some((r: any) => r.id === draft.id), "not in /mine");

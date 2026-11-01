@@ -66,7 +66,7 @@ export async function createStripeCheckoutSession(input: {
 }) {
   if (!stripeConfigured()) {
     throw new BillingProviderError(
-      "Stripe test checkout is ready but needs the test secret, webhook secret, and Price IDs on the backend",
+      "Stripe checkout needs a secret key, webhook secret, and Price IDs on the backend",
       503,
     );
   }
@@ -80,7 +80,7 @@ export async function createStripeCheckoutSession(input: {
   const priceId = plan.providerPriceId || stripePriceId(input.planCode, input.interval);
   if (!priceId) {
     throw new BillingProviderError(
-      `${plan.name} ${plan.interval.toLowerCase()} is missing its Stripe test Price ID`,
+      `${plan.name} ${plan.interval.toLowerCase()} is missing its Stripe Price ID`,
       503,
     );
   }
@@ -130,7 +130,7 @@ export async function createStripeCheckoutSession(input: {
 }
 
 export async function createStripePortalSession(userId: string, returnBaseUrl?: string) {
-  if (!stripeConfigured()) throw new BillingProviderError("Stripe test mode is not configured", 503);
+  if (!stripeConfigured()) throw new BillingProviderError("Stripe is not configured", 503);
   await connectDatabase();
   const subscription = await db.orm.public.Subscription
     .select("providerCustomerId")
@@ -147,7 +147,7 @@ export async function createStripePortalSession(userId: string, returnBaseUrl?: 
 }
 
 export async function getStripeCheckoutStatus(userId: string, sessionId: string) {
-  if (!stripeConfigured()) throw new BillingProviderError("Stripe test mode is not configured", 503);
+  if (!stripeConfigured()) throw new BillingProviderError("Stripe is not configured", 503);
   const session = await getStripe().checkout.sessions.retrieve(sessionId);
   if (session.client_reference_id !== userId && session.metadata?.userId !== userId) {
     throw new BillingProviderError("Checkout session not found", 404);

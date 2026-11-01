@@ -470,8 +470,16 @@ roadmapsRouter.post("/", authenticate, activeRoles, async (request, response) =>
     return;
   }
 
-  const roadmap = await createRoadmapDraft(input, request.appUser!);
-  response.status(201).json({ roadmap });
+  try {
+    const roadmap = await createRoadmapDraft(input, request.appUser!);
+    response.status(201).json({ roadmap });
+  } catch (error) {
+    if (error instanceof RoadmapMutationError) {
+      response.status(error.status).json({ error: error.message, code: error.code });
+      return;
+    }
+    throw error;
+  }
 });
 
 roadmapsRouter.put("/:roadmapId", authenticate, activeRoles, async (request, response) => {
