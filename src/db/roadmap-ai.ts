@@ -17,6 +17,7 @@ import {
   createRoadmapAiResponse,
   getRoadmapAiProviderConfig,
 } from "../lib/anthropic-messages.ts";
+import { errorLogFields, runtimeLog } from "../lib/runtime-log.ts";
 import { getRoadmapAtVersion, type RoadmapRecord, type RoadmapTaskInput } from "./roadmaps.ts";
 
 export class RoadmapAiError extends Error {
@@ -696,12 +697,27 @@ export async function sendRoadmapAiMessage(input: {
     }).catch((usageError) => console.error("Unable to record AI usage", usageError));
   } catch (error) {
     const blockedReason = error instanceof AiProviderError ? error.blockedReason : undefined;
+    const latencyMs = Date.now() - startedAt;
+    runtimeLog(blockedReason ? "warn" : "error", "roadmap_ai_run_failed", {
+      runId: run.id,
+      userId: input.user.id,
+      roadmapId: resolved.roadmapId,
+      model: provider.model,
+      latencyMs,
+      blockedReason,
+      applicationStatus: error instanceof AiProviderError ? error.status : 500,
+      providerStage: error instanceof AiProviderError ? error.details.stage : undefined,
+      upstreamStatus: error instanceof AiProviderError ? error.details.upstreamStatus : undefined,
+      upstreamType: error instanceof AiProviderError ? error.details.upstreamType : undefined,
+      upstreamRequestId: error instanceof AiProviderError ? error.details.upstreamRequestId : undefined,
+      ...errorLogFields(error),
+    });
     const instantFactory = run.createdAt.constructor as { from(value: string): typeof run.createdAt };
     await db.orm.public.AiRun.where({ id: run.id }).update({
       status: blockedReason ? "BLOCKED" : "FAILED",
       blockedReason: blockedReason ?? null,
       error: error instanceof Error ? error.message.slice(0, 1_000) : "Unknown AI error",
-      latencyMs: Date.now() - startedAt,
+      latencyMs,
       completedAt: instantFactory.from(new Date().toISOString()),
     });
     await recordAiUsage({
@@ -711,7 +727,7 @@ export async function sendRoadmapAiMessage(input: {
       failed: !blockedReason,
       blocked: Boolean(blockedReason),
     }).catch((usageError) => console.error("Unable to record failed AI usage", usageError));
-    if (error instanceof AiProviderError) throw new RoadmapAiError(error.message, error.status);
+    if (error instanceof AiProviderError) throw new RoadmapAiError(error.publicMessage, error.status);
     throw error;
   }
 
