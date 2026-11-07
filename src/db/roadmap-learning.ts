@@ -460,18 +460,36 @@ export async function listFollowedRoadmaps(userId: string): Promise<FollowedRoad
 
   const records = await Promise.all(follows.map(async (follow) => {
     if (!follow.versionId) return null;
-    const [roadmap, state] = await Promise.all([
-      getPersonalizedRoadmapAtVersion(userId, follow.roadmapId, follow.versionId),
-      getRoadmapLearningState(userId, follow.roadmapId),
-    ]);
-    if (!roadmap || !state.progress) return null;
-    return {
-      roadmap,
-      followedAt: String(follow.followedAt),
-      followerCount: state.followerCount,
-      updateAvailable: state.updateAvailable,
-      progress: state.progress,
-    };
+    const availableRoadmap = await db.orm.public.Roadmap
+      .select("id")
+      .first({
+        id: follow.roadmapId,
+        status: "PUBLISHED",
+        visibility: "PUBLIC",
+        moderationStatus: "APPROVED",
+      });
+    if (!availableRoadmap) return null;
+
+    try {
+      const [roadmap, state] = await Promise.all([
+        getPersonalizedRoadmapAtVersion(userId, follow.roadmapId, follow.versionId),
+        getRoadmapLearningState(userId, follow.roadmapId),
+      ]);
+      if (!roadmap || !state.progress) return null;
+      return {
+        roadmap,
+        followedAt: String(follow.followedAt),
+        followerCount: state.followerCount,
+        updateAvailable: state.updateAvailable,
+        progress: state.progress,
+      };
+    } catch (error) {
+      // A roadmap can be archived or made private between the availability check
+      // and the learning-state lookup. Keep the follow/progress for a future
+      // restore, but do not let one unavailable roadmap break the whole list.
+      if (error instanceof RoadmapLearningError && error.status === 404) return null;
+      throw error;
+    }
   }));
 
   return records.filter((record): record is FollowedRoadmapRecord => record !== null);

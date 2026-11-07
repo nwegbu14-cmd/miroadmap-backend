@@ -537,6 +537,45 @@ export async function deleteRoadmapAsAdmin(
   });
 }
 
+export async function archiveRoadmapAsAdmin(
+  roadmapId: string,
+  actorId: string,
+): Promise<void> {
+  await connectDatabase();
+
+  const roadmap = await db.orm.public.Roadmap
+    .select("id", "title", "status", "updatedAt")
+    .first({ id: roadmapId });
+
+  if (!roadmap) throw new RoadmapMutationError("Roadmap not found", 404);
+  if (roadmap.status === "ARCHIVED") return;
+
+  const { title, status: previousStatus, updatedAt } = roadmap;
+
+  const instantFactory = updatedAt.constructor as {
+    from(value: string): typeof updatedAt;
+  };
+  const archivedAt = instantFactory.from(new Date().toISOString());
+
+  await db.transaction(async (tx) => {
+    await tx.orm.public.Roadmap.where({ id: roadmapId }).update({
+      status: "ARCHIVED",
+      visibility: "PRIVATE",
+      archivedAt,
+    });
+    await tx.orm.public.UserActivity.create({
+      userId: actorId,
+      action: "ROADMAP_ARCHIVED",
+      metadata: {
+        roadmapId,
+        title,
+        previousStatus,
+        source: "ADMIN",
+      },
+    });
+  });
+}
+
 export async function updateRoadmapDraft(
   roadmapId: string,
   input: CreateRoadmapInput,
