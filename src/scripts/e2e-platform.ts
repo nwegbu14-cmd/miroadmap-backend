@@ -663,6 +663,16 @@ async function main() {
     expectStatus(all, 200);
     const count = await api("GET", "/api/notifications/unread-count", { token: creatorToken });
     expect(count.body.unreadCount === 0, `unread ${count.body.unreadCount}`);
+    expect(count.headers.get("cache-control")?.includes("no-store"), "notification count may be cached");
+
+    const freshLoginToken = await login(creatorEmail);
+    const afterLogin = await api("GET", "/api/notifications?limit=5", { token: freshLoginToken });
+    expect(afterLogin.body.unreadCount === 0, `read state did not survive login: ${afterLogin.body.unreadCount} unread`);
+    expect(
+      afterLogin.body.notifications.every((notification: any) => Boolean(notification.readAt)),
+      "a notification returned unread after a fresh login",
+    );
+    expect(afterLogin.headers.get("cache-control")?.includes("no-store"), "notification list may be cached");
   });
   await check("Cursor pagination returns disjoint pages", async () => {
     const a = await api("GET", "/api/notifications?limit=1", { token: followerToken });

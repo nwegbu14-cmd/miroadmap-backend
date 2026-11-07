@@ -20,6 +20,10 @@ export const notificationPreferencesRouter = Router();
 const requireActiveUser = requireRoles("USER", "MODERATOR", "ADMIN", "SUPER_ADMIN");
 
 notificationsRouter.use(authenticate, requireActiveUser);
+notificationsRouter.use((_request, response, next) => {
+  response.set("Cache-Control", "private, no-store");
+  next();
+});
 
 notificationsRouter.get("/", async (request, response) => {
   const options = parseNotificationListOptions(request.query as Record<string, unknown>);
@@ -64,6 +68,10 @@ notificationsRouter.patch("/:notificationId/unread", async (request, response) =
 });
 
 notificationPreferencesRouter.use(authenticate, requireActiveUser);
+notificationPreferencesRouter.use((_request, response, next) => {
+  response.set("Cache-Control", "private, no-store");
+  next();
+});
 
 notificationPreferencesRouter.get("/", async (request, response) => {
   response.json({ preferences: await getNotificationPreferences(request.appUser!.id) });
