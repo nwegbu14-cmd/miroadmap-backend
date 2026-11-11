@@ -8,6 +8,19 @@ export type AccessSubscriptionStatus =
 export const FREE_ACTIVE_FOLLOW_LIMIT = 1;
 export const FREE_CREATED_ROADMAP_LIMIT = 1;
 
+export function roadmapCountsTowardActiveFollowLimit(input: {
+  status: string;
+  visibility: string;
+  moderationStatus: string;
+  publishedVersionId?: string | null;
+  currentVersionId?: string | null;
+}): boolean {
+  return input.status === "PUBLISHED"
+    && input.visibility === "PUBLIC"
+    && input.moderationStatus === "APPROVED"
+    && Boolean(input.publishedVersionId ?? input.currentVersionId);
+}
+
 export function subscriptionGrantsPlanAccess(
   status: AccessSubscriptionStatus | null | undefined,
 ): boolean {

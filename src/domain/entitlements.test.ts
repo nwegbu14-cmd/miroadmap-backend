@@ -6,6 +6,7 @@ import {
   createdRoadmapLimit,
   FREE_ACTIVE_FOLLOW_LIMIT,
   FREE_CREATED_ROADMAP_LIMIT,
+  roadmapCountsTowardActiveFollowLimit,
   subscriptionGrantsPlanAccess,
 } from "./entitlements.ts";
 
@@ -52,4 +53,25 @@ test("free users can follow one roadmap and paid entitlements can be finite or u
     entitlementLimit: null,
   }), null);
   assert.equal(activeFollowLimit({ privileged: true }), null);
+});
+
+test("only currently accessible roadmaps consume an active follow slot", () => {
+  const available = {
+    status: "PUBLISHED",
+    visibility: "PUBLIC",
+    moderationStatus: "APPROVED",
+    publishedVersionId: "version-1",
+  };
+
+  assert.equal(roadmapCountsTowardActiveFollowLimit(available), true);
+  assert.equal(roadmapCountsTowardActiveFollowLimit({ ...available, visibility: "PRIVATE" }), false);
+  assert.equal(roadmapCountsTowardActiveFollowLimit({ ...available, visibility: "UNLISTED" }), false);
+  assert.equal(roadmapCountsTowardActiveFollowLimit({ ...available, status: "ARCHIVED" }), false);
+  assert.equal(roadmapCountsTowardActiveFollowLimit({ ...available, moderationStatus: "PENDING" }), false);
+  assert.equal(roadmapCountsTowardActiveFollowLimit({ ...available, publishedVersionId: null }), false);
+  assert.equal(roadmapCountsTowardActiveFollowLimit({
+    ...available,
+    publishedVersionId: null,
+    currentVersionId: "legacy-version",
+  }), true);
 });

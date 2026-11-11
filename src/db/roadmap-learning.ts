@@ -3,7 +3,10 @@ import {
   db,
 } from "../../miroadmap-schema/src/prisma/db.ts";
 import { calculateRoadmapProgress } from "../domain/roadmap-progress.ts";
-import { activeFollowLimit } from "../domain/entitlements.ts";
+import {
+  activeFollowLimit,
+  roadmapCountsTowardActiveFollowLimit,
+} from "../domain/entitlements.ts";
 import { getAvatarPublicUrl } from "../lib/avatar-storage.ts";
 import type { RoadmapRecord } from "./roadmaps.ts";
 import {
@@ -48,6 +51,28 @@ async function userActiveFollowLimit(userId: string): Promise<number | null> {
     entitlementEnabled: entitlement?.limitBool,
     entitlementLimit: entitlement?.limitInt,
   });
+}
+
+async function activeAccessibleFollowCount(userId: string): Promise<number> {
+  const follows = await db.orm.public.RoadmapFollow
+    .select("roadmapId")
+    .where({ userId })
+    .all();
+  const roadmaps = await Promise.all(follows.map((follow) => (
+    db.orm.public.Roadmap
+      .select(
+        "status",
+        "visibility",
+        "moderationStatus",
+        "publishedVersionId",
+        "currentVersionId",
+      )
+      .first({ id: follow.roadmapId })
+  )));
+
+  return roadmaps.filter((roadmap) => (
+    roadmap ? roadmapCountsTowardActiveFollowLimit(roadmap) : false
+  )).length;
 }
 
 export type RoadmapProgressRecord = {
@@ -282,10 +307,8 @@ export async function followRoadmap(userId: string, identifier: string) {
   if (!existingFollow) {
     const limit = await userActiveFollowLimit(userId);
     if (limit !== null) {
-      const activeFollows = await db.orm.public.RoadmapFollow
-        .where({ userId })
-        .aggregate((follow) => ({ count: follow.count() }));
-      if (activeFollows.count >= limit) {
+      const activeFollowCount = await activeAccessibleFollowCount(userId);
+      if (activeFollowCount >= limit) {
         throw new RoadmapLearningError(
           "Your Free plan includes 1 active roadmap. Unfollow your current roadmap or upgrade for unlimited follows.",
           402,
