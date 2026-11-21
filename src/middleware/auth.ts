@@ -68,6 +68,33 @@ export const authenticate: RequestHandler = async (request, response, next) => {
   }
 };
 
+/**
+ * Adds an authenticated viewer when a bearer token is present while preserving
+ * genuinely public reads. An invalid supplied token is still rejected so a
+ * stale session cannot silently produce misleading viewer state.
+ */
+export const optionallyAuthenticate: RequestHandler = (request, response, next) => {
+  if (!bearerToken(request)) {
+    next();
+    return;
+  }
+  void authenticate(request, response, next);
+};
+
+export const attachOptionalActiveUser: RequestHandler = async (request, _response, next) => {
+  try {
+    if (!request.authUser) {
+      next();
+      return;
+    }
+    const appUser = await findUserById(request.authUser.id);
+    if (appUser?.status === "ACTIVE") request.appUser = appUser;
+    next();
+  } catch (error) {
+    next(error);
+  }
+};
+
 export function requireRoles(...roles: AppRole[]): RequestHandler {
   return async (request: Request, response: Response, next: NextFunction) => {
     try {

@@ -11,6 +11,7 @@ import { adminUsersRouter } from "./src/routes/admin-users.ts";
 import { adminSupportRouter } from "./src/routes/admin-support.ts";
 import { adminEmailRouter } from "./src/routes/admin-email.ts";
 import { adminVerificationsRouter } from "./src/routes/admin-verifications.ts";
+import { adminCommentsRouter } from "./src/routes/admin-comments.ts";
 import { authRouter } from "./src/routes/auth.ts";
 import { billingRouter, stripeWebhookHandler } from "./src/routes/billing.ts";
 import {
@@ -24,6 +25,7 @@ import { adminNewsletterRouter, mailchimpWebhookHandler, newsletterRouter } from
 import { resendWebhookHandler } from "./src/routes/resend-webhook.ts";
 import { adminPartnershipsRouter, partnershipsRouter } from "./src/routes/partnerships.ts";
 import { supportRouter } from "./src/routes/support.ts";
+import { commentsRouter } from "./src/routes/comments.ts";
 import {
   apiSecurityHeaders,
   rejectUnsafePayloadShape,
@@ -119,9 +121,11 @@ app.use("/api/admin/stories", adminStoriesRouter);
 app.use("/api/admin/users", adminUsersRouter);
 app.use("/api/admin/support", adminSupportRouter);
 app.use("/api/admin/verifications", adminVerificationsRouter);
+app.use("/api/admin/comments", adminCommentsRouter);
 app.use("/api/notifications", notificationsRouter);
 app.use("/api/notification-preferences", notificationPreferencesRouter);
 app.use("/api/roadmaps", roadmapsRouter);
+app.use("/api/comments", commentsRouter);
 app.use("/api/stories", storiesRouter);
 
 app.use((_request, response) => {

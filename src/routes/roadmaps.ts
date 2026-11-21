@@ -39,6 +39,7 @@ import {
   uploadRoadmapImage,
 } from "../lib/roadmap-storage.ts";
 import { roadmapAiRouter } from "./roadmap-ai.ts";
+import { roadmapCommentsRouter } from "./roadmap-comments.ts";
 import {
   decodeVerificationEvidenceImage,
   uploadVerificationEvidenceImage,
@@ -54,6 +55,7 @@ const viewRateLimit = createRateLimit({
 });
 
 roadmapsRouter.use("/:roadmapId/ai", roadmapAiRouter);
+roadmapsRouter.use("/:roadmapId/comments", roadmapCommentsRouter);
 
 function text(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
