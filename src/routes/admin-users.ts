@@ -1,6 +1,7 @@
 import { Router } from "express";
 
 import { getConfig } from "../config.ts";
+import { canDeleteAccount, deleteAccount } from "../db/account-deletion.ts";
 import {
   createInvitedUser,
   findUserByEmail,
@@ -130,7 +131,35 @@ adminUsersRouter.get(
       response.status(404).json({ error: "User not found" });
       return;
     }
-    response.json({ user });
+    response.json({
+      user,
+      canDelete: canDeleteAccount(request.appUser!, user) && (user.status !== "DELETED" || user.deletionPending),
+    });
+  },
+);
+
+adminUsersRouter.delete(
+  "/:userId",
+  authenticate,
+  requireRoles("ADMIN", "SUPER_ADMIN"),
+  async (request, response) => {
+    const userId = String(request.params.userId);
+    if (!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(userId)) {
+      response.status(404).json({ error: "User not found" });
+      return;
+    }
+    if (request.body?.confirmation !== "DELETE") {
+      response.status(400).json({ error: "Type DELETE to confirm account deletion" });
+      return;
+    }
+
+    try {
+      await deleteAccount({ userId, administrator: request.appUser! });
+      response.json({ deleted: true, user: await getAdminUserDetails(userId) });
+    } catch (error) {
+      if (!(error instanceof UserAdministrationError)) throw error;
+      response.status(error.status).json({ error: error.message });
+    }
   },
 );
 

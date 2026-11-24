@@ -9,8 +9,8 @@ import type { AppAccountType, AppRole, AppUserIdentity } from "../types/express.
 export type UserStatus = "ACTIVE" | "SUSPENDED" | "DELETED";
 
 export class UserAdministrationError extends Error {
-  constructor(message: string, readonly status: number) {
-    super(message);
+  constructor(message: string, readonly status: number, options?: ErrorOptions) {
+    super(message, options);
   }
 }
 
@@ -261,14 +261,17 @@ export async function syncAuthenticatedUser(input: SyncUserInput): Promise<AppUs
     }
   }
 
+  if (existing.status === "DELETED") throw new UserAdministrationError("Account is deleted", 403);
+
   const role = input.makeSuperAdmin ? "SUPER_ADMIN" : existing.role;
   const update = input.makeSuperAdmin
     ? { email: input.email, fullName: input.fullName, role, accountType: "INTERNAL" as const }
     : { email: input.email, fullName: input.fullName, role };
-  await db.orm.public.User.where({ id: input.id }).update(update);
+  await db.orm.public.User.where({ id: input.id, status: existing.status }).update(update);
 
   const updated = await findUserById(input.id);
   if (!updated) throw new Error("User disappeared after profile synchronization");
+  if (updated.status === "DELETED") throw new UserAdministrationError("Account is deleted", 403);
   return updated;
 }
 
@@ -338,11 +341,15 @@ export async function getAdminUserDetails(id: string) {
         .limit(25)
         .all()
     : [];
+  const pendingDeletion = user.status === "DELETED"
+    ? await db.orm.public.DataRequest.select("id").first({ userId: id, type: "DELETE", status: "PROCESSING" })
+    : null;
 
   return {
     ...user,
     id: String(user.id),
     savedRoadmaps: savedRoadmaps.count,
+    deletionPending: Boolean(pendingDeletion),
     profile,
     activities,
     subscription: subscription ? { ...subscription, plan, invoices } : null,
@@ -376,11 +383,12 @@ export async function suspendUser(input: {
   const suspendedAt = instantFactory.from(new Date().toISOString());
   let emailNotificationId: string | undefined;
   await db.transaction(async (tx) => {
-    await tx.orm.public.User.where({ id: input.userId }).update({
+    const suspended = await tx.orm.public.User.select("id").where({ id: input.userId, status: "ACTIVE" }).update({
       status: "SUSPENDED",
       suspendedAt,
       suspendedReason: input.reason,
     });
+    if (!suspended) throw new UserAdministrationError("The account status changed. Reload and try again.", 409);
     const activity = await tx.orm.public.UserActivity.select("id").create({
       userId: input.userId,
       action: "ACCOUNT_SUSPENDED",
@@ -447,11 +455,12 @@ export async function reactivateUser(input: {
 
   let emailNotificationId: string | undefined;
   await db.transaction(async (tx) => {
-    await tx.orm.public.User.where({ id: input.userId }).update({
+    const reactivated = await tx.orm.public.User.select("id").where({ id: input.userId, status: "SUSPENDED" }).update({
       status: "ACTIVE",
       suspendedAt: null,
       suspendedReason: null,
     });
+    if (!reactivated) throw new UserAdministrationError("The account status changed. Reload and try again.", 409);
     const activity = await tx.orm.public.UserActivity.select("id").create({
       userId: input.userId,
       action: "ACCOUNT_RESTORED",
@@ -557,9 +566,10 @@ export async function updateUserAvatar(
   avatarPath: string | null,
 ): Promise<AppUserIdentity> {
   await connectDatabase();
-  await db.orm.public.User.where({ id: userId }).update({ avatarPath });
+  await db.orm.public.User.where({ id: userId, status: "ACTIVE" }).update({ avatarPath });
 
   const updated = await findUserById(userId);
   if (!updated) throw new Error("User disappeared after avatar update");
+  if (updated.status !== "ACTIVE") throw new UserAdministrationError("Account is inactive", 403);
   return updated;
 }

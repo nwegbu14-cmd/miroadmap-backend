@@ -1,6 +1,7 @@
 import { Router } from "express";
 
 import { isBootstrapSuperAdmin } from "../config.ts";
+import { deleteAccount } from "../db/account-deletion.ts";
 import {
   acceptLegalDocument,
   completeOnboarding,
@@ -10,6 +11,7 @@ import {
   syncAuthenticatedUser,
   updatePersonalProfile,
   updateUserAvatar,
+  UserAdministrationError,
   type OnboardingAnswers,
 } from "../db/users.ts";
 import {
@@ -49,14 +51,18 @@ authRouter.post("/profile", authenticate, async (request, response) => {
       : "";
   const fullName = requestedName || metadataName || email.split("@")[0]!;
 
-  const user = await syncAuthenticatedUser({
-    id: authUser.id,
-    email,
-    fullName,
-    makeSuperAdmin: isBootstrapSuperAdmin(email),
-  });
-
-  response.json({ user: await responseUser(user) });
+  try {
+    const user = await syncAuthenticatedUser({
+      id: authUser.id,
+      email,
+      fullName,
+      makeSuperAdmin: isBootstrapSuperAdmin(email),
+    });
+    response.json({ user: await responseUser(user) });
+  } catch (error) {
+    if (!(error instanceof UserAdministrationError)) throw error;
+    response.status(error.status).json({ error: error.message });
+  }
 });
 
 authRouter.get("/me", authenticate, async (request, response) => {
@@ -67,6 +73,21 @@ authRouter.get("/me", authenticate, async (request, response) => {
   }
 
   response.json({ user: await responseUser(user) });
+});
+
+authRouter.delete("/account", authenticate, async (request, response) => {
+  if (request.body?.confirmation !== "DELETE") {
+    response.status(400).json({ error: "Type DELETE to confirm account deletion" });
+    return;
+  }
+
+  try {
+    await deleteAccount({ userId: request.authUser!.id });
+    response.json({ deleted: true });
+  } catch (error) {
+    if (!(error instanceof UserAdministrationError)) throw error;
+    response.status(error.status).json({ error: error.message });
+  }
 });
 
 authRouter.get("/personal-profile", authenticate, async (request, response) => {
@@ -82,7 +103,7 @@ const editableResidencyStatuses = new Set<OnboardingAnswers["residencyStatus"]>(
   "OTHER",
 ]);
 
-authRouter.put("/personal-profile", authenticate, async (request, response) => {
+authRouter.put("/personal-profile", authenticate, requireRoles("USER", "MODERATOR", "ADMIN", "SUPER_ADMIN"), async (request, response) => {
   const normalize = (value: unknown, maxLength: number) => {
     if (value === undefined || value === null) return null;
     if (typeof value !== "string") return undefined;

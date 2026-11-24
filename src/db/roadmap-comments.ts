@@ -74,7 +74,7 @@ async function serializeComment(
   currentVersionId: string,
 ) {
   const author = await db.orm.public.User
-    .select("id", "fullName", "avatarPath", "role")
+    .select("id", "fullName", "avatarPath", "role", "status")
     .first({ id: comment.authorId });
   const version = await db.orm.public.RoadmapVersion
     .select("version")
@@ -108,7 +108,7 @@ async function serializeComment(
     createdAt: String(comment.createdAt),
     postedOnEarlierVersion: comment.roadmapVersionId !== currentVersionId,
     step: step ? { position: step.position, title: step.title } : null,
-    author: author ? {
+    author: author && author.status !== "DELETED" ? {
       id: String(author.id),
       fullName: author.fullName,
       avatarUrl: getAvatarPublicUrl(author.avatarPath),

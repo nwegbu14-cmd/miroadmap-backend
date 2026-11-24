@@ -3,6 +3,7 @@ import { Router, type NextFunction, type Request, type Response } from "express"
 import {
   cancelTesterSubscription,
   getBillingOverview,
+  isPlanAvailableForCheckout,
   simulateTesterCheckout,
   type TesterBillingInterval,
   type TesterPlanCode,
@@ -57,6 +58,10 @@ billingRouter.post("/tester-checkout", ...activeUser, async (request, response) 
     response.status(400).json({ error: "Choose a valid tester plan and billing interval" });
     return;
   }
+  if (!isPlanAvailableForCheckout(planCode)) {
+    response.status(409).json({ error: "Ultimate is coming soon." });
+    return;
+  }
 
   const billing = await simulateTesterCheckout({
     userId: request.appUser!.id,
@@ -84,6 +89,10 @@ billingRouter.post("/checkout-session", ...activeUser, async (request, response,
     : undefined;
   if (!testerPlanCodes.has(planCode) || !testerIntervals.has(interval)) {
     response.status(400).json({ error: "Choose a valid plan and billing interval" });
+    return;
+  }
+  if (!isPlanAvailableForCheckout(planCode)) {
+    response.status(409).json({ error: "Ultimate is coming soon." });
     return;
   }
   if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 100)) {

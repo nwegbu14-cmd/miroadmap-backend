@@ -57,6 +57,14 @@ export function getPaymentProviderSummary() {
   };
 }
 
+export async function cancelStripeSubscription(subscriptionId: string): Promise<void> {
+  const stripe = getStripe();
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  if (subscriptionStatus(subscription.status) !== "CANCELED") {
+    await stripe.subscriptions.cancel(subscriptionId);
+  }
+}
+
 export async function createStripeCheckoutSession(input: {
   user: AppUserIdentity;
   planCode: TesterPlanCode;
@@ -188,9 +196,6 @@ async function syncSubscription(subscription: Stripe.Subscription) {
   const planId = subscription.metadata.planId;
   if (!userId || !planId) throw new Error("Stripe subscription is missing MiRoadmap metadata");
 
-  const existing = await db.orm.public.Subscription
-    .select("id", "planId", "status", "createdAt")
-    .first({ userId });
   const customerId = objectId(subscription.customer);
   const firstItem = subscription.items.data[0];
   const values = {
@@ -203,24 +208,47 @@ async function syncSubscription(subscription: Stripe.Subscription) {
     canceledAt: null,
   };
 
-  const stored = existing
-    ? await db.orm.public.Subscription.select("id", "createdAt").where({ id: existing.id }).update(values)
-    : await db.orm.public.Subscription.select("id", "createdAt").create({ userId, ...values });
-  if (!stored) throw new Error("Unable to synchronize the Stripe subscription");
+  const synced = await db.transaction(async (tx) => {
+    // Serialize Stripe events with account deletion's update of the same row.
+    const lockAccount = db.raw.sql`
+      SELECT "status"::text AS "status"
+      FROM "public"."user"
+      WHERE "id" = ${userId}::uuid
+      FOR UPDATE
+    `.returnsRow({ status: "pg/text@1" }).build();
+    const [user] = await tx.query(lockAccount);
+    if (!user) throw new Error("Stripe subscription has no MiRoadmap account");
+    if (user.status === "DELETED") return null;
 
-  if (firstItem?.current_period_start && firstItem.current_period_end) {
-    await db.orm.public.Subscription.where({ id: stored.id }).update({
-      currentPeriodStart: instantLike(stored.createdAt, firstItem.current_period_start),
-      currentPeriodEnd: instantLike(stored.createdAt, firstItem.current_period_end),
-      trialEndsAt: subscription.trial_end
-        ? instantLike(stored.createdAt, subscription.trial_end)
-        : null,
-      canceledAt: subscription.canceled_at
-        ? instantLike(stored.createdAt, subscription.canceled_at)
-        : null,
-    });
+    const existing = await tx.orm.public.Subscription
+      .select("id", "planId", "status")
+      .first({ userId });
+    const stored = existing
+      ? await tx.orm.public.Subscription.select("id", "createdAt").where({ id: existing.id }).update(values)
+      : await tx.orm.public.Subscription.select("id", "createdAt").create({ userId, ...values });
+    if (!stored) throw new Error("Unable to synchronize the Stripe subscription");
+
+    if (firstItem?.current_period_start && firstItem.current_period_end) {
+      await tx.orm.public.Subscription.where({ id: stored.id }).update({
+        currentPeriodStart: instantLike(stored.createdAt, firstItem.current_period_start),
+        currentPeriodEnd: instantLike(stored.createdAt, firstItem.current_period_end),
+        trialEndsAt: subscription.trial_end
+          ? instantLike(stored.createdAt, subscription.trial_end)
+          : null,
+        canceledAt: subscription.canceled_at
+          ? instantLike(stored.createdAt, subscription.canceled_at)
+          : null,
+      });
+    }
+
+    return { existing, stored };
+  });
+  if (!synced) {
+    if (values.status !== "CANCELED") await cancelStripeSubscription(subscription.id);
+    return;
   }
 
+  const { existing, stored } = synced;
   const statusChanged = !existing || existing.status !== values.status || existing.planId !== planId;
   if (statusChanged) {
     const plan = await db.orm.public.Plan.select("name", "interval").first({ id: planId });
@@ -254,14 +282,18 @@ async function syncInvoice(invoice: Stripe.Invoice, failed: boolean) {
   if (!providerSubId) return;
 
   let subscription = await db.orm.public.Subscription
-    .select("id", "userId", "updatedAt")
+    .select("id", "userId", "updatedAt", "status")
     .first({ providerSubId });
   if (!subscription) {
     const stripeSubscription = await getStripe().subscriptions.retrieve(providerSubId);
     await syncSubscription(stripeSubscription);
     subscription = await db.orm.public.Subscription
-      .select("id", "userId", "updatedAt")
+      .select("id", "userId", "updatedAt", "status")
       .first({ providerSubId });
+    if (!subscription && stripeSubscription.metadata.userId) {
+      const user = await db.orm.public.User.select("status").first({ id: stripeSubscription.metadata.userId });
+      if (user?.status === "DELETED") return;
+    }
   }
   if (!subscription) throw new Error("Unable to resolve the invoice subscription");
 
@@ -288,8 +320,10 @@ async function syncInvoice(invoice: Stripe.Invoice, failed: boolean) {
     ? await db.orm.public.Invoice.select("id").where({ id: existing.id }).update(values)
     : await db.orm.public.Invoice.select("id").create(values);
 
-  if (failed) {
-    await db.orm.public.Subscription.where({ id: subscription.id }).update({ status: "PAST_DUE" });
+  if (failed && subscription.status !== "CANCELED") {
+    await db.orm.public.Subscription
+      .where({ id: subscription.id, status: subscription.status })
+      .update({ status: "PAST_DUE" });
   }
 
   await createNotification({

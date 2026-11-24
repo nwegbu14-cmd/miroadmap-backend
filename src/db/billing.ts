@@ -10,6 +10,10 @@ import { userAcceptsNotification } from "./notifications.ts";
 export type TesterPlanCode = "PREMIUM" | "ULTIMATE";
 export type TesterBillingInterval = "MONTH" | "YEAR";
 
+export function isPlanAvailableForCheckout(code: string): boolean {
+  return code === "PREMIUM";
+}
+
 const testerPlanDefinitions = [
   {
     code: "PREMIUM" as const,
@@ -166,7 +170,7 @@ export async function getBillingOverview(userId: string) {
     .where({ active: true })
     .orderBy((plan) => plan.sortOrder.asc())
     .all();
-  const plans = planRows.filter((plan) => plan.code === "PREMIUM" || plan.code === "ULTIMATE");
+  const plans = planRows.filter((plan) => isPlanAvailableForCheckout(plan.code));
 
   const subscription = await db.orm.public.Subscription
     .select("id", "planId", "status", "isComped", "currentPeriodEnd", "providerCustomerId", "createdAt", "updatedAt")
